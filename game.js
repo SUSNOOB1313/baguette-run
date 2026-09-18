@@ -2,7 +2,8 @@
    BAGUETTE RUN — an 8-bit-style bakery + delivery game
    Two phases per order:
      1) SHOP   — knead, shape, bake and top a baguette to match an order
-     2) DELIVERY — dodge cars across a Frogger-style street to the house
+     2) DELIVERY — first-person pseudo-3D street ride, dodging traffic
+                   and riding to the glowing house
    Pure canvas + vanilla JS, no build step, no external assets.
    ============================================================ */
 (function () {
@@ -18,13 +19,6 @@
   const H = canvas.height;  // 216
 
   const PALETTE = {
-    sky: "#1a1430",
-    sky2: "#2b2350",
-    road: "#3a3a44",
-    roadLine: "#e8d9a0",
-    sidewalk: "#6b5a44",
-    grass: "#2f6b3a",
-    grassDark: "#245029",
     counter: "#8a5a34",
     counterDark: "#6b4426",
     dough: "#f0d9a0",
@@ -96,7 +90,7 @@
         const color = sprite.colors[ch];
         if (!color) continue;
         ctx.fillStyle = color;
-        ctx.fillRect(Math.round(x + c * scale), Math.round(y + r * scale), scale, scale);
+        ctx.fillRect(Math.round(x + c * scale), Math.round(y + r * scale), Math.ceil(scale), Math.ceil(scale));
       }
     }
   }
@@ -143,6 +137,34 @@
         "p.....",
       ],
     },
+    houseBgA: {
+      colors: { r: "#6b4b8a", w: "#c9bfa8", d: "#5a4230", k: "#241a12" },
+      rows: [
+        "....rrrrrrrr....",
+        "...rrrrrrrrrr...",
+        "..rrrrrrrrrrrr..",
+        ".rrrrrrrrrrrrrr.",
+        "wwwwwwwwwwwwwwww",
+        "wwwwwkwwwwwwwwww",
+        "wwwwwkwwwwwwwwww",
+        "wwwwwwwwwwwwwwww",
+        "ddddddddddddddddd",
+      ],
+    },
+    houseBgB: {
+      colors: { r: "#4f7a5c", w: "#d8ccae", d: "#6b4426", k: "#241a12" },
+      rows: [
+        "....rrrrrrrr....",
+        "...rrrrrrrrrr...",
+        "..rrrrrrrrrrrr..",
+        ".rrrrrrrrrrrrrr.",
+        "wwwwwwwwwwwwwwww",
+        "wwwwwkwwwwwwwwww",
+        "wwwwwkwwwwwwwwww",
+        "wwwwwwwwwwwwwwww",
+        "ddddddddddddddddd",
+      ],
+    },
     heart: {
       colors: { r: PALETTE.red, d: "#8a2a20" },
       rows: [
@@ -167,61 +189,31 @@
     },
   };
 
-  // Bike + rider, viewed from behind/above (moving up the screen)
-  function bikeSprite(leanFrame) {
-    const lean = leanFrame || 0; // -1 left, 0 straight, 1 right
-    const shift = lean === -1 ? "l" : lean === 1 ? "r" : "s";
-    const base = {
-      s: [
-        "...kkk...",
-        "..kwwwk..",
-        "..kssss..",
-        ".kssssssk.",
-        ".kssssssk.",
-        "..kbbbbk..",
-        "...kbbk...",
-        "..wk..kw..",
-        ".ww....ww.",
-      ],
-      l: [
-        "..kkk....",
-        ".kwwwk...",
-        ".kssss...",
-        "kssssssk.",
-        "kssssssk.",
-        ".kbbbbk..",
-        "..kbbk...",
-        ".wk..kw..",
-        "ww....ww.",
-      ],
-      r: [
-        "....kkk..",
-        "...kwwwk.",
-        "...ssssk.",
-        ".kssssssk",
-        ".kssssssk",
-        "..kbbbbk.",
-        "...kbbk..",
-        "..wk..kw.",
-        ".ww....ww",
-      ],
-    };
+  function carRearSprite(color) {
+    // seen from behind: taillights near the bottom (closer/rear) edge
     return {
-      colors: { k: "#241a12", w: "#f4c9a3", s: "#d94f3c", b: "#3a3a44" },
-      rows: base[shift],
-    };
-  }
-
-  function carSprite(color) {
-    return {
-      colors: { k: "#141018", b: color, w: "#bfe6ff", t: "#0f0f0f" },
+      colors: { k: "#141018", b: color, w: "#20242c", t: "#ff5544" },
       rows: [
         ".kkkkkkkkkkkk.",
         "kbbbbbbbbbbbbk",
         "kbbwwwwwwwbbbk",
         "kbbbbbbbbbbbbk",
+        "ktbbbbbbbbbtbk",
+        ".k..........k.",
+      ],
+    };
+  }
+  function carFrontSprite(color) {
+    // seen head-on: bright headlights near the bottom edge
+    return {
+      colors: { k: "#141018", b: color, w: "#bfe6ff", y: "#fff2b0" },
+      rows: [
+        ".kkkkkkkkkkkk.",
         "kbbbbbbbbbbbbk",
-        ".t..t..t..t..",
+        "kbbwwwwwwwbbbk",
+        "kbbbbbbbbbbbbk",
+        "kybbbbbbbbbybk",
+        ".k..........k.",
       ],
     };
   }
@@ -259,13 +251,27 @@
   // Input
   // ---------------------------------------------------------
   const keys = new Set();
-  const keysPressed = new Set(); // edge-triggered
   window.addEventListener("keydown", (e) => {
-    if (!keys.has(e.code)) keysPressed.add(e.code);
     keys.add(e.code);
     if (["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Space"].includes(e.code)) e.preventDefault();
   });
   window.addEventListener("keyup", (e) => keys.delete(e.code));
+
+  // Touch/click steering (tap-and-hold left/right half of the screen) for the delivery phase
+  let steerPointer = 0;
+  let activePointerId = null;
+  function pointerToLogicalX(e) {
+    const rect = canvas.getBoundingClientRect();
+    const cx = (e.touches ? e.touches[0].clientX : e.clientX) - rect.left;
+    return (cx / rect.width) * W;
+  }
+  canvas.addEventListener("pointerdown", (e) => {
+    if (Game.scene !== "DELIVERY") return;
+    activePointerId = e.pointerId;
+    steerPointer = pointerToLogicalX(e) < W / 2 ? -1 : 1;
+  });
+  window.addEventListener("pointerup", (e) => { if (e.pointerId === activePointerId) { steerPointer = 0; activePointerId = null; } });
+  window.addEventListener("pointercancel", () => { steerPointer = 0; activePointerId = null; });
 
   let buttons = []; // active clickable regions for current scene: {x,y,w,h,label,sub,onClick,disabled,style}
   function addButton(b) { buttons.push(b); return b; }
@@ -288,7 +294,6 @@
     }
   }
   canvas.addEventListener("click", handleClick);
-  canvas.addEventListener("touchstart", handleClick, { passive: false });
 
   function drawButton(b) {
     ctx.fillStyle = b.disabled ? "#332b22" : (b.active ? PALETTE.yellow : PALETTE.counter);
@@ -357,11 +362,7 @@
       const idx = randi(0, pool.length - 1);
       picked.push(pool.splice(idx, 1)[0].id);
     }
-    return {
-      customer: choice(CUSTOMERS),
-      toppings: picked,
-      house: randi(0, 4), // which house column to deliver to
-    };
+    return { customer: choice(CUSTOMERS), toppings: picked };
   }
 
   function startNewOrderFlow() {
@@ -381,15 +382,17 @@
     startNewOrderFlow();
   }
 
+  // Decrements a life, plays sfx, shows the popup and flips to GAMEOVER if out of lives.
+  // Callers are responsible for repositioning/resetting the delivery run afterwards
+  // (checking Game.scene is still "DELIVERY" first, since it may have just become GAMEOVER).
   function loseLife(reasonText) {
     Game.lives--;
     Audio8.crash();
+    Game.popupText = reasonText || "CRASH!";
+    Game.popupTimer = 1.1;
     if (Game.lives <= 0) {
       Game.scene = "GAMEOVER";
       Audio8.gameover();
-    } else {
-      Game.popupText = reasonText || "CRASH!";
-      Delivery.respawn();
     }
   }
 
@@ -502,7 +505,6 @@
         const sc = 3;
         const size = spriteSize(SPRITES.baguetteBare, sc);
         const bx = wx + 10, by = wy + 20;
-        const tint = this.bakeResult === "burnt" ? "#3a2010" : null;
         drawSprite(ctx, bx, by, sc, SPRITES.baguetteBare);
         if (this.bakeResult === "burnt") {
           ctx.fillStyle = "rgba(20,10,5,0.45)";
@@ -599,51 +601,135 @@
   }
 
   // ---------------------------------------------------------
-  // DELIVERY SCENE — Frogger-style street crossing
+  // DELIVERY SCENE — first-person pseudo-3D street ride
   // ---------------------------------------------------------
-  const ROAD_TOP = 34, ROAD_BOTTOM = 178;
+  const SEG_LEN = 200;         // world units per road segment
+  const ROAD_HALF = 1000;      // half road width, in world units
+  const RUMBLE_LEN = 3;        // segments per rumble/grass color band
+  const LANES = [-620, 0, 620];
+  const CAR_HALF_W = 130, PLAYER_HALF_W = 80;
+  const CAMERA_DEPTH = 1 / Math.tan((100 / 2) * Math.PI / 180);
+  const CAMERA_HEIGHT = 1000;
+  const DRAW_DIST = 130;       // segments rendered each frame
+  const HORIZON = H * 0.46;
+  const X_FACTOR = 64;
+  const Y_FACTOR = 26000 * (CAMERA_HEIGHT / 1000);
+  const STEER_SPEED = 1950;
+  function baseSpeed(day) { return 2350 + Math.min(day, 12) * 120; }
+
   const Delivery = {
-    player: { x: W / 2, y: 0, w: 14, h: 16, lean: 0 },
-    lanes: [],
-    targetCol: 2,
-    timeLeft: 0,
+    segments: [],
+    cars: [],
+    lastCarZ: -99999,
+    roadState: { mode: "straight", remaining: 24, curveDir: 1, curveMag: 0, chunkLen: 1, phase: 0 },
+    player: { z: 0, laneOffset: 0, speed: 0 },
+    steer: 0,
+    targetZ: 0,
+    targetSide: 1,
+    targetSegIndex: 0,
     finished: false,
     finishTimer: 0,
+    missed: false,
+
     reset() {
-      this.player.x = W / 2;
-      this.player.y = ROAD_BOTTOM + 16;
-      this.player.lean = 0;
+      this.segments = [];
+      this.cars = [];
+      this.lastCarZ = -99999;
+      this.roadState = { mode: "straight", remaining: 24, curveDir: 1, curveMag: 0, chunkLen: 1, phase: 0 };
+      this.player.z = 0;
+      this.player.laneOffset = 0;
+      this.player.speed = baseSpeed(Game.day);
+      this.steer = 0;
       this.finished = false;
       this.finishTimer = 0;
-      this.targetCol = Game.order.house;
-      const laneCount = Math.min(3 + Math.floor(Game.day / 2), 7);
-      this.lanes = [];
-      const laneH = (ROAD_BOTTOM - ROAD_TOP) / laneCount;
-      const baseSpeed = 24 + Game.day * 5;
-      for (let i = 0; i < laneCount; i++) {
-        const isSafe = i % 3 === 2 && laneCount > 3; // occasional median every 3rd
-        const dir = i % 2 === 0 ? 1 : -1;
-        const speed = isSafe ? 0 : baseSpeed * rand(0.7, 1.3);
-        const cars = [];
-        if (!isSafe) {
-          const carCount = randi(2, 2 + Math.floor(Game.day / 2));
-          for (let c = 0; c < carCount; c++) {
-            cars.push({
-              x: rand(0, W),
-              color: choice(["#d94f3c", "#4f8ad9", "#ffcf5c", "#8a5cc9", "#57b567"]),
-              w: 26, h: 14,
-            });
+      this.missed = false;
+      this.targetZ = 9000 + Game.day * 700 + rand(0, 2500);
+      this.targetSide = Math.random() < 0.5 ? -1 : 1;
+      this.targetSegIndex = Math.floor(this.targetZ / SEG_LEN);
+      this.ensureUpTo(Math.floor(this.player.z / SEG_LEN) + DRAW_DIST + 5);
+    },
+
+    genNextSegment() {
+      const st = this.roadState;
+      let curve;
+      if (st.mode === "straight") {
+        curve = 0;
+        st.remaining--;
+        if (st.remaining <= 0) {
+          if (Math.random() < 0.78) {
+            st.mode = "curve";
+            st.curveDir = Math.random() < 0.5 ? -1 : 1;
+            st.chunkLen = randi(18, 34);
+            st.phase = 0;
+            st.curveMag = (0.9 + Math.random() * 1.0) * (1 + Math.min(Game.day, 10) * 0.05);
+          } else {
+            st.remaining = randi(14, 30);
           }
         }
-        this.lanes.push({ y: ROAD_TOP + i * laneH + laneH / 2 - 7, h: laneH, dir, speed, cars, safe: isSafe });
+      } else {
+        st.phase++;
+        curve = st.curveDir * st.curveMag * Math.sin(Math.PI * st.phase / st.chunkLen);
+        if (st.phase >= st.chunkLen) {
+          st.mode = "straight";
+          st.remaining = randi(16, 32);
+        }
       }
-      this.timeLeft = 18 + laneCount * 2;
+      const idx = this.segments.length ? this.segments[this.segments.length - 1].index + 1 : 0;
+      const prevX1 = this.segments.length ? this.segments[this.segments.length - 1].x1 : 0;
+      const seg = { index: idx, x0: prevX1, x1: prevX1 + curve, rumble: Math.floor(idx / RUMBLE_LEN) % 2 === 0 };
+      this.segments.push(seg);
+
+      if (idx === this.targetSegIndex) {
+        seg.deco = { kind: "target", side: this.targetSide };
+      } else if (idx > 4 && idx % 7 === 0) {
+        seg.deco = { kind: Math.random() < 0.5 ? "bgA" : "bgB", side: (Math.floor(idx / 7) % 2 === 0) ? -1 : 1 };
+      } else if (idx > 4 && idx % 5 === 2) {
+        seg.deco = { kind: "tree", side: Math.random() < 0.5 ? -1 : 1 };
+      }
+
+      const segZ = idx * SEG_LEN + SEG_LEN * 0.5;
+      const farEnoughFromPlayer = segZ > this.player.z + 3600;
+      const farEnoughFromLastCar = segZ > this.lastCarZ + 1300;
+      if (farEnoughFromPlayer && farEnoughFromLastCar && Math.random() < (0.09 + Math.min(Game.day, 10) * 0.009)) {
+        const oncoming = Math.random() < 0.5;
+        this.cars.push({
+          z: segZ,
+          laneX: choice(LANES),
+          vz: oncoming ? -rand(200, 420) : rand(0, 160),
+          kind: oncoming ? "front" : "rear",
+          color: choice(["#d94f3c", "#4f8ad9", "#ffcf5c", "#8a5cc9", "#57b567"]),
+        });
+        this.lastCarZ = segZ;
+      }
     },
-    respawn() {
-      this.player.x = W / 2;
-      this.player.y = ROAD_BOTTOM + 16;
-      Game.invuln = 1.5;
+    ensureUpTo(index) {
+      while (!this.segments.length || this.segments[this.segments.length - 1].index < index) {
+        this.genNextSegment();
+      }
+      const baseIdx = Math.floor(this.player.z / SEG_LEN);
+      while (this.segments.length && this.segments[0].index < baseIdx - 4) this.segments.shift();
+      this.cars = this.cars.filter((c) => c.z > this.player.z - 700);
     },
+    segmentAt(index) {
+      if (!this.segments.length) return null;
+      const i = index - this.segments[0].index;
+      if (i < 0) return this.segments[0];
+      if (i >= this.segments.length) return this.segments[this.segments.length - 1];
+      return this.segments[i];
+    },
+    roadCenterXAt(z) {
+      const idx = Math.floor(z / SEG_LEN);
+      const seg = this.segmentAt(idx);
+      if (!seg) return 0;
+      const frac = (z - idx * SEG_LEN) / SEG_LEN;
+      return seg.x0 + (seg.x1 - seg.x0) * frac;
+    },
+    respawnAfterCrash() {
+      this.player.z = Math.max(0, this.player.z - 700);
+      this.player.laneOffset *= 0.3;
+      Game.invuln = 1.4;
+    },
+
     update(dt) {
       if (this.finished) {
         this.finishTimer -= dt;
@@ -660,138 +746,229 @@
         return;
       }
       if (Game.invuln > 0) Game.invuln -= dt;
-      this.timeLeft -= dt;
-      if (this.timeLeft <= 0) {
-        loseLife("TOO SLOW! BAGUETTE WENT COLD.");
-        return;
-      }
 
-      const speed = 62;
-      let dx = 0, dy = 0;
-      if (keys.has("ArrowLeft") || keys.has("KeyA")) dx -= 1;
-      if (keys.has("ArrowRight") || keys.has("KeyD")) dx += 1;
-      if (keys.has("ArrowUp") || keys.has("KeyW")) dy -= 1;
-      if (keys.has("ArrowDown") || keys.has("KeyS")) dy += 1;
-      this.player.lean = dx < 0 ? -1 : dx > 0 ? 1 : 0;
-      if (dx || dy) {
-        const len = Math.hypot(dx, dy) || 1;
-        this.player.x += (dx / len) * speed * dt;
-        this.player.y += (dy / len) * speed * dt;
-      }
-      this.player.x = clamp(this.player.x, 12, W - 12);
-      this.player.y = clamp(this.player.y, ROAD_TOP - 10, ROAD_BOTTOM + 20);
+      const throttle = (keys.has("ArrowUp") || keys.has("KeyW")) ? 1 : (keys.has("ArrowDown") || keys.has("KeyS")) ? -1 : 0;
+      const cruise = baseSpeed(Game.day);
+      const targetSpeed = throttle > 0 ? cruise * 1.42 : throttle < 0 ? cruise * 0.55 : cruise;
+      this.player.speed += (targetSpeed - this.player.speed) * clamp(dt * 3, 0, 1);
 
-      // move cars
-      this.lanes.forEach((lane) => {
-        lane.cars.forEach((car) => {
-          car.x += lane.dir * lane.speed * dt;
-          if (lane.dir > 0 && car.x > W + 20) car.x = -20;
-          if (lane.dir < 0 && car.x < -20) car.x = W + 20;
-        });
-      });
+      let steer = 0;
+      if (keys.has("ArrowLeft") || keys.has("KeyA")) steer -= 1;
+      if (keys.has("ArrowRight") || keys.has("KeyD")) steer += 1;
+      if (steerPointer) steer += steerPointer;
+      steer = clamp(steer, -1, 1);
+      this.steer = steer;
+      this.player.laneOffset = clamp(this.player.laneOffset + steer * STEER_SPEED * dt, -1500, 1500);
 
-      // collisions
+      this.player.z += this.player.speed * dt;
+      this.ensureUpTo(Math.floor(this.player.z / SEG_LEN) + DRAW_DIST + 5);
+
+      this.cars.forEach((c) => { c.z += c.vz * dt; });
+
       if (Game.invuln <= 0) {
-        for (const lane of this.lanes) {
-          if (lane.safe) continue;
-          if (this.player.y + this.player.h / 2 < lane.y || this.player.y - this.player.h / 2 > lane.y + lane.h) continue;
-          for (const car of lane.cars) {
-            if (Math.abs(this.player.x - car.x) < (car.w / 2 + this.player.w / 2 - 3)) {
+        const px = this.roadCenterXAt(this.player.z) + this.player.laneOffset;
+        for (const c of this.cars) {
+          if (Math.abs(c.z - this.player.z) < 170) {
+            const cx = this.roadCenterXAt(c.z) + c.laneX;
+            if (Math.abs(cx - px) < CAR_HALF_W + PLAYER_HALF_W) {
               loseLife("CRASH!");
+              if (Game.scene === "DELIVERY") this.respawnAfterCrash();
               return;
             }
           }
         }
       }
 
-      // reached house?
-      if (this.player.y < ROAD_TOP - 2) {
-        const houseX = houseColumnX(this.targetCol);
-        if (Math.abs(this.player.x - houseX) < 26) {
+      if (!this.missed && this.player.z >= this.targetZ) {
+        const wantX = this.targetSide * (ROAD_HALF - 260);
+        if (Math.abs(this.player.laneOffset - wantX) < 340) {
           this.finished = true;
           this.finishTimer = 1.1;
-          Game.score += Math.round(this.timeLeft) * 2;
-          Game.popupText = "DELIVERED! +" + (Math.round(this.timeLeft) * 2);
+          const bonus = Math.max(20, Math.round(200 - (this.player.z - this.targetZ) / 4));
+          Game.score += bonus;
+          Game.popupText = "DELIVERED! +" + bonus;
           Game.popupTimer = 1.1;
           Audio8.success();
-        } else {
-          this.player.y = ROAD_TOP - 2;
+        } else if (this.player.z >= this.targetZ + 260) {
+          this.missed = true;
+          loseLife("MISSED THE HOUSE!");
+          if (Game.scene === "DELIVERY") this.reset();
         }
       }
     },
+
     render() {
       buttons = [];
-      // sky / start sidewalk
-      ctx.fillStyle = PALETTE.sky;
+      ctx.fillStyle = "#1a1430";
       ctx.fillRect(0, 0, W, H);
-      ctx.fillStyle = PALETTE.grass;
-      ctx.fillRect(0, 0, W, ROAD_TOP);
-      ctx.fillStyle = PALETTE.sidewalk;
-      ctx.fillRect(0, ROAD_BOTTOM, W, H - ROAD_BOTTOM);
-
-      // houses along the top
-      for (let i = 0; i < 5; i++) {
-        const hx = houseColumnX(i);
-        const isTarget = i === this.targetCol;
-        ctx.save();
-        if (isTarget) {
-          const pulse = 0.7 + Math.sin(performance.now() / 150) * 0.3;
-          ctx.shadowColor = `rgba(255,207,92,${pulse})`;
-          ctx.shadowBlur = 8;
-        }
-        const sc = 2;
-        const sz = spriteSize(SPRITES.houseTarget, sc);
-        drawSprite(ctx, hx - sz.w / 2, 4, sc, SPRITES.houseTarget);
-        ctx.restore();
-        if (isTarget) {
-          drawSprite(ctx, hx - sz.w / 2 - 8, -2, 1.6, SPRITES.houseFlag);
-        }
+      const grad = ctx.createLinearGradient(0, 0, 0, HORIZON);
+      grad.addColorStop(0, "#231c40");
+      grad.addColorStop(1, "#3d3164");
+      ctx.fillStyle = grad;
+      ctx.fillRect(0, 0, W, HORIZON);
+      ctx.fillStyle = "#2b2350";
+      const parallax = (this.player.z * 0.018) % 160;
+      for (let i = -1; i < Math.ceil(W / 160) + 1; i++) {
+        ctx.fillRect(i * 160 - parallax, HORIZON - 22, 96, 22);
       }
 
-      // lanes
-      this.lanes.forEach((lane) => {
-        if (lane.safe) {
-          ctx.fillStyle = PALETTE.grassDark;
-          ctx.fillRect(0, lane.y - 3, W, lane.h);
+      const camX = this.roadCenterXAt(this.player.z) + this.player.laneOffset;
+      const camZ = this.player.z;
+      const baseIndex = Math.floor(this.player.z / SEG_LEN);
+
+      const project = (worldX, worldZ) => {
+        let dz = worldZ - camZ;
+        if (dz < 1) dz = 1;
+        const scale = CAMERA_DEPTH / dz;
+        return {
+          x: W / 2 + scale * (worldX - camX) * X_FACTOR,
+          y: HORIZON + scale * Y_FACTOR,
+          w: scale * ROAD_HALF * X_FACTOR * 2,
+          scale,
+        };
+      };
+      const quad = (x1, y1, x2, y2, x3, y3, x4, y4, color) => {
+        ctx.fillStyle = color;
+        ctx.beginPath();
+        ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.lineTo(x3, y3); ctx.lineTo(x4, y4);
+        ctx.closePath();
+        ctx.fill();
+      };
+
+      const decos = []; // deferred so nearer ones draw over farther road strips, in far-to-near order
+      for (let n = DRAW_DIST - 1; n >= 0; n--) {
+        const idx = baseIndex + n;
+        const seg = this.segmentAt(idx);
+        if (!seg) continue;
+        const p1 = project(seg.x0, idx * SEG_LEN);
+        const p2 = project(seg.x1, (idx + 1) * SEG_LEN);
+        if (p1.y <= HORIZON || p2.y <= HORIZON) continue;
+        if (p1.y > H + 40 && p2.y > H + 40) continue;
+
+        const grassColor = seg.rumble ? "#2f6b3a" : "#295f33";
+        const roadColor = seg.rumble ? "#3a3a44" : "#37374a";
+        const rumbleColor = seg.rumble ? "#c94f3c" : "#e8d9a0";
+
+        ctx.fillStyle = grassColor;
+        ctx.fillRect(0, Math.min(p2.y, H), W, Math.max(1, Math.min(p1.y, H) - Math.min(p2.y, H)));
+
+        const rw1 = p1.w * 1.14, rw2 = p2.w * 1.14;
+        quad(p1.x - p1.w / 2, p1.y, p1.x + p1.w / 2, p1.y, p2.x + p2.w / 2, p2.y, p2.x - p2.w / 2, p2.y, roadColor);
+        quad(p1.x - rw1 / 2, p1.y, p1.x - p1.w / 2, p1.y, p2.x - p2.w / 2, p2.y, p2.x - rw2 / 2, p2.y, rumbleColor);
+        quad(p1.x + p1.w / 2, p1.y, p1.x + rw1 / 2, p1.y, p2.x + rw2 / 2, p2.y, p2.x + p2.w / 2, p2.y, rumbleColor);
+        if (seg.rumble) {
+          const lw1 = Math.max(1, p1.w * 0.035), lw2 = Math.max(1, p2.w * 0.035);
+          quad(p1.x - lw1 / 2, p1.y, p1.x + lw1 / 2, p1.y, p2.x + lw2 / 2, p2.y, p2.x - lw2 / 2, p2.y, "#e8d9a0");
+        }
+
+        if (seg.deco) decos.push({ deco: seg.deco, idx, x0: seg.x0 });
+        this.cars.forEach((c) => {
+          if (Math.floor(c.z / SEG_LEN) === idx) decos.push({ car: c });
+        });
+      }
+
+      // draw decorations/cars in the same far-to-near order they were collected
+      decos.forEach((d) => {
+        if (d.car) {
+          const c = d.car;
+          const wx = this.roadCenterXAt(c.z) + c.laneX;
+          const p = project(wx, c.z);
+          if (p.y <= HORIZON) return;
+          const sc = clamp(p.scale * 9500, 0.5, 8);
+          const spr = c.kind === "front" ? carFrontSprite(c.color) : carRearSprite(c.color);
+          const sz = spriteSize(spr, sc);
+          drawSprite(ctx, p.x - sz.w / 2, p.y - sz.h, sc, spr);
         } else {
-          ctx.fillStyle = PALETTE.road;
-          ctx.fillRect(0, lane.y - 3, W, lane.h);
-          ctx.fillStyle = PALETTE.roadLine;
-          const dashW = 10, gap = 8;
-          const offset = (performance.now() / 20) % (dashW + gap) * -Math.sign(lane.dir || 1);
-          for (let dx = offset; dx < W; dx += dashW + gap) {
-            ctx.fillRect(dx, lane.y + lane.h / 2 - 4, dashW, 2);
-          }
-          lane.cars.forEach((car) => {
-            const sc = 2;
-            const spr = carSprite(car.color);
+          const deco = d.deco;
+          const margin = deco.kind === "tree" ? 170 : deco.kind === "target" ? 520 : 480;
+          const wx = d.x0 + deco.side * (ROAD_HALF + margin);
+          const p = project(wx, d.idx * SEG_LEN);
+          if (p.y <= HORIZON) return;
+          if (deco.kind === "target") {
+            const sc = clamp(p.scale * 9000, 0.6, 7);
+            const spr = SPRITES.houseTarget;
             const sz = spriteSize(spr, sc);
+            const pulse = 0.6 + Math.sin(performance.now() / 150) * 0.4;
             ctx.save();
-            if (lane.dir < 0) { ctx.translate(car.x, lane.y + lane.h / 2 - sz.h / 2 + sz.h/2); ctx.scale(-1, 1); ctx.translate(-car.x, -(lane.y + lane.h / 2 - sz.h / 2 + sz.h/2)); }
-            drawSprite(ctx, car.x - sz.w / 2, lane.y + lane.h / 2 - sz.h / 2, sc, spr);
+            ctx.shadowColor = `rgba(255,207,92,${pulse})`;
+            ctx.shadowBlur = 10 * sc;
+            drawSprite(ctx, p.x - sz.w / 2, p.y - sz.h, sc, spr);
             ctx.restore();
-          });
+            drawSprite(ctx, p.x - sz.w / 2 - 10 * sc, p.y - sz.h - 16 * sc, sc * 0.9, SPRITES.houseFlag);
+          } else if (deco.kind === "bgA" || deco.kind === "bgB") {
+            const spr = deco.kind === "bgA" ? SPRITES.houseBgA : SPRITES.houseBgB;
+            const sc = clamp(p.scale * 8000, 0.4, 5.5);
+            const sz = spriteSize(spr, sc);
+            drawSprite(ctx, p.x - sz.w / 2, p.y - sz.h, sc, spr);
+          } else if (deco.kind === "tree") {
+            const sc = clamp(p.scale * 7000, 0.4, 5);
+            ctx.fillStyle = "#5a3f2a";
+            ctx.fillRect(p.x - 2 * sc, p.y - 10 * sc, 4 * sc, 10 * sc);
+            ctx.fillStyle = "#2f6b3a";
+            ctx.beginPath();
+            ctx.arc(p.x, p.y - 14 * sc, 8 * sc, 0, Math.PI * 2);
+            ctx.fill();
+          }
         }
       });
 
-      // player
-      if (Game.invuln <= 0 || Math.floor(performance.now() / 100) % 2 === 0) {
-        const sc = 1.7;
-        const spr = bikeSprite(this.player.lean);
-        const sz = spriteSize(spr, sc);
-        drawSprite(ctx, this.player.x - sz.w / 2, this.player.y - sz.h / 2, sc, spr);
-        drawToppingsOnBaguette(this.player.x - 6, this.player.y - sz.h / 2 - 2, 1, Game.order.toppings);
-      }
-
+      drawCockpit(this.steer);
       drawHUD();
-      drawPanelText("TIME " + Math.max(0, Math.ceil(this.timeLeft)), W - 10, 6, 7, this.timeLeft < 5 ? PALETTE.red : PALETTE.white, "right");
-      drawPanelText("Deliver to Marie's — glowing house!".replace("Marie's", Game.order.customer + "'s"), W / 2, H - 10, 5.5, PALETTE.white, "center");
+
+      // progress bar
+      const barX = 10, barY = 24, barW = W - 20;
+      ctx.fillStyle = "rgba(10,6,16,0.5)";
+      ctx.fillRect(barX, barY, barW, 5);
+      const frac = clamp(this.player.z / this.targetZ, 0, 1);
+      ctx.fillStyle = PALETTE.yellow;
+      ctx.fillRect(barX, barY, barW * frac, 5);
+      ctx.fillStyle = PALETTE.ink;
+      ctx.beginPath();
+      ctx.moveTo(barX + barW, barY - 2); ctx.lineTo(barX + barW + 5, barY + 2.5); ctx.lineTo(barX + barW, barY + 7);
+      ctx.closePath(); ctx.fill();
+
+      const sideWord = this.targetSide < 0 ? "LEFT" : "RIGHT";
+      drawPanelText("To " + Game.order.customer + "'s — " + sideWord + " side!", W / 2, H - 8, 5.5, PALETTE.white, "center");
+
+      // faint tap-zone hints for touch steering
+      ctx.fillStyle = "rgba(244,234,208,0.10)";
+      ctx.beginPath(); ctx.moveTo(14, H - 20); ctx.lineTo(26, H - 26); ctx.lineTo(26, H - 14); ctx.closePath(); ctx.fill();
+      ctx.beginPath(); ctx.moveTo(W - 14, H - 20); ctx.lineTo(W - 26, H - 26); ctx.lineTo(W - 26, H - 14); ctx.closePath(); ctx.fill();
 
       drawPopup();
     },
   };
-  function houseColumnX(col) {
-    return 76 + col * ((W - 152) / 4);
+
+  function drawCockpit(steer) {
+    const lean = steer * 9;
+    const cx = W / 2 + lean;
+    ctx.save();
+    const glow = ctx.createRadialGradient(W / 2, HORIZON + 6, 4, W / 2, HORIZON + 6, 100);
+    glow.addColorStop(0, "rgba(255,240,190,0.16)");
+    glow.addColorStop(1, "rgba(255,240,190,0)");
+    ctx.fillStyle = glow;
+    ctx.fillRect(0, HORIZON - 20, W, 110);
+    ctx.restore();
+
+    ctx.fillStyle = "#1c1712";
+    ctx.beginPath();
+    ctx.moveTo(cx - 74, H);
+    ctx.lineTo(cx - 42, H - 24);
+    ctx.lineTo(cx + 42, H - 24);
+    ctx.lineTo(cx + 74, H);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = "#3a3a44";
+    ctx.fillRect(cx - 76, H - 13, 20, 13);
+    ctx.fillRect(cx + 56, H - 13, 20, 13);
+    ctx.fillStyle = PALETTE.crust;
+    ctx.fillRect(cx - 14, H - 28, 28, 7);
+
+    const bx = W - 56, by = H - 38;
+    ctx.fillStyle = "#6b4426";
+    ctx.fillRect(bx, by + 8, 40, 20);
+    drawSprite(ctx, bx + 1, by - 4, 1.5, SPRITES.baguetteBare);
+    drawToppingsOnBaguette(bx + 1, by - 4, 1.5, Game.order.toppings);
   }
 
   // ---------------------------------------------------------
@@ -805,7 +982,7 @@
       drawSprite(ctx, 8 + i * 12, 6, 1.6, spr);
     }
     drawPanelText("SCORE " + Game.score, 70, 6, 7, PALETTE.yellow);
-    drawPanelText("DAY " + Game.day, W - 10, H - 12, 6, "#a89a86", "right");
+    drawPanelText("DAY " + Game.day, W - 10, 6, 6, "#a89a86", "right");
   }
   function drawPopup() {
     if (Game.popupTimer > 0) {
@@ -831,7 +1008,7 @@
   // ---------------------------------------------------------
   function renderTitle() {
     buttons = [];
-    ctx.fillStyle = PALETTE.sky;
+    ctx.fillStyle = "#1a1430";
     ctx.fillRect(0, 0, W, H);
     for (let i = 0; i < 40; i++) {
       ctx.fillStyle = i % 2 ? "#3a2f5c" : "#2b2350";
@@ -844,13 +1021,13 @@
     drawToppingsOnBaguette(W / 2 - sz.w / 2, 40 + bob, sc, ["cinnamon", "sugar"]);
 
     drawPanelText("Run a bakery. Fill orders.", W / 2, 110, 7, PALETTE.white, "center");
-    drawPanelText("Dodge cars to deliver!", W / 2, 122, 7, PALETTE.white, "center");
+    drawPanelText("Ride the street to deliver!", W / 2, 122, 7, PALETTE.white, "center");
 
     addButton({
       x: W / 2 - 70, y: 145, w: 140, h: 30, label: "START GAME",
       onClick: () => { Audio8.start(); resetGame(); },
     });
-    drawPanelText("Arrow Keys/WASD to ride · Click to bake", W / 2, 190, 5.5, "#a89a86", "center");
+    drawPanelText("Steer: Arrows/A,D · Throttle: Up/Down", W / 2, 190, 5.5, "#a89a86", "center");
   }
 
   function renderGameOver() {
@@ -882,7 +1059,6 @@
   function loop(now) {
     const dt = Math.min(0.05, (now - last) / 1000);
     last = now;
-    keysPressed.clear();
 
     if (!Game.paused) {
       if (Game.scene === "SHOP") Shop.update(dt);
