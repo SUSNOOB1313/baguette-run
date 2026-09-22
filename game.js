@@ -874,7 +874,11 @@
           const wx = this.roadCenterXAt(c.z) + c.laneX;
           const p = project(wx, c.z);
           if (p.y <= HORIZON) return;
-          const sc = clamp(p.scale * 9500, 0.5, 8);
+          // Scale the sprite so its on-screen width matches the car's actual world-space
+          // width (same math as the road itself), so it fills roughly one lane instead
+          // of ballooning toward the full road width as it gets close.
+          const carWorldW = CAR_HALF_W * 2;
+          const sc = clamp((p.scale * carWorldW * X_FACTOR) / 14, 0.3, 9);
           const spr = c.kind === "front" ? carFrontSprite(c.color) : carRearSprite(c.color);
           const sz = spriteSize(spr, sc);
           drawSprite(ctx, p.x - sz.w / 2, p.y - sz.h, sc, spr);
