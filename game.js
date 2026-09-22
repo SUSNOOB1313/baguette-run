@@ -341,7 +341,7 @@
   const Game = {
     scene: "TITLE",
     score: 0,
-    lives: 3,
+    lives: 1,
     day: 1,
     ordersThisDay: 0,
     ordersPerDay: 3,
@@ -373,7 +373,7 @@
 
   function resetGame() {
     Game.score = 0;
-    Game.lives = 3;
+    Game.lives = 1;
     Game.day = 1;
     Game.ordersThisDay = 0;
     Game.ordersPerDay = 3;
@@ -993,11 +993,9 @@
   function drawHUD() {
     ctx.fillStyle = "rgba(10,6,16,0.55)";
     ctx.fillRect(0, 0, W, 20);
-    for (let i = 0; i < 3; i++) {
-      const spr = i < Game.lives ? SPRITES.heart : SPRITES.heartEmpty;
-      drawSprite(ctx, 8 + i * 12, 6, 1.6, spr);
-    }
-    drawPanelText("SCORE " + Game.score, 70, 6, 7, PALETTE.yellow);
+    // one hit and it's over, so the HUD shows a single life, not a row of hearts
+    drawSprite(ctx, 8, 6, 1.6, Game.lives > 0 ? SPRITES.heart : SPRITES.heartEmpty);
+    drawPanelText("SCORE " + Game.score, 30, 6, 7, PALETTE.yellow);
     drawPanelText("DAY " + Game.day, W - 10, 6, 6, "#a89a86", "right");
   }
   function drawPopup() {
