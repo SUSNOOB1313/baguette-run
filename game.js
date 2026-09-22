@@ -641,7 +641,7 @@
       this.steer = 0;
       this.finished = false;
       this.finishTimer = 0;
-      this.targetZ = 9000 + Game.day * 700 + rand(0, 2500);
+      this.targetZ = 17000 + Game.day * 1400 + rand(0, 4500);
       this.targetSegIndex = Math.floor(this.targetZ / SEG_LEN);
       this.ensureUpTo(Math.floor(this.player.z / SEG_LEN) + DRAW_DIST + 5);
     },
@@ -686,16 +686,16 @@
 
       const segZ = idx * SEG_LEN + SEG_LEN * 0.5;
       const farEnoughFromPlayer = segZ > this.player.z + 3600;
-      const farEnoughFromLastCar = segZ > this.lastCarZ + 950;
+      const farEnoughFromLastCar = segZ > this.lastCarZ + 620;
       const shortOfDriveway = segZ < this.targetZ - STOP_ZONE - 300;
       if (farEnoughFromPlayer && farEnoughFromLastCar && shortOfDriveway
-          && Math.random() < (0.16 + Math.min(Game.day, 10) * 0.016)) {
-        const oncomingChance = 0.5 + Math.min(Game.day, 10) * 0.02;
+          && Math.random() < (0.26 + Math.min(Game.day, 10) * 0.024)) {
+        const oncomingChance = 0.55 + Math.min(Game.day, 10) * 0.025;
         const oncoming = Math.random() < oncomingChance;
         this.cars.push({
           z: segZ,
           laneX: choice(LANES),
-          vz: oncoming ? -rand(280, 560) : rand(0, 190),
+          vz: oncoming ? -rand(380, 760) : rand(0, 260),
           kind: oncoming ? "front" : "rear",
           color: choice(["#d94f3c", "#4f8ad9", "#ffcf5c", "#8a5cc9", "#57b567"]),
         });
