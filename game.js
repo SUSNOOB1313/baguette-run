@@ -615,6 +615,7 @@
   const X_FACTOR = 64;
   const Y_FACTOR = 26000 * (CAMERA_HEIGHT / 1000);
   const STEER_SPEED = 1950;
+  const STOP_ZONE = 1300;      // world units before the house where the bike brakes to a stop
   function baseSpeed(day) { return 2350 + Math.min(day, 12) * 120; }
 
   const Delivery = {
@@ -625,11 +626,9 @@
     player: { z: 0, laneOffset: 0, speed: 0 },
     steer: 0,
     targetZ: 0,
-    targetSide: 1,
     targetSegIndex: 0,
     finished: false,
     finishTimer: 0,
-    missed: false,
 
     reset() {
       this.segments = [];
@@ -642,9 +641,7 @@
       this.steer = 0;
       this.finished = false;
       this.finishTimer = 0;
-      this.missed = false;
       this.targetZ = 9000 + Game.day * 700 + rand(0, 2500);
-      this.targetSide = Math.random() < 0.5 ? -1 : 1;
       this.targetSegIndex = Math.floor(this.targetZ / SEG_LEN);
       this.ensureUpTo(Math.floor(this.player.z / SEG_LEN) + DRAW_DIST + 5);
     },
@@ -680,7 +677,7 @@
       this.segments.push(seg);
 
       if (idx === this.targetSegIndex) {
-        seg.deco = { kind: "target", side: this.targetSide };
+        seg.deco = { kind: "target" };
       } else if (idx > 4 && idx % 7 === 0) {
         seg.deco = { kind: Math.random() < 0.5 ? "bgA" : "bgB", side: (Math.floor(idx / 7) % 2 === 0) ? -1 : 1 };
       } else if (idx > 4 && idx % 5 === 2) {
@@ -689,13 +686,16 @@
 
       const segZ = idx * SEG_LEN + SEG_LEN * 0.5;
       const farEnoughFromPlayer = segZ > this.player.z + 3600;
-      const farEnoughFromLastCar = segZ > this.lastCarZ + 1300;
-      if (farEnoughFromPlayer && farEnoughFromLastCar && Math.random() < (0.09 + Math.min(Game.day, 10) * 0.009)) {
-        const oncoming = Math.random() < 0.5;
+      const farEnoughFromLastCar = segZ > this.lastCarZ + 950;
+      const shortOfDriveway = segZ < this.targetZ - STOP_ZONE - 300;
+      if (farEnoughFromPlayer && farEnoughFromLastCar && shortOfDriveway
+          && Math.random() < (0.16 + Math.min(Game.day, 10) * 0.016)) {
+        const oncomingChance = 0.5 + Math.min(Game.day, 10) * 0.02;
+        const oncoming = Math.random() < oncomingChance;
         this.cars.push({
           z: segZ,
           laneX: choice(LANES),
-          vz: oncoming ? -rand(200, 420) : rand(0, 160),
+          vz: oncoming ? -rand(280, 560) : rand(0, 190),
           kind: oncoming ? "front" : "rear",
           color: choice(["#d94f3c", "#4f8ad9", "#ffcf5c", "#8a5cc9", "#57b567"]),
         });
@@ -703,6 +703,7 @@
       }
     },
     ensureUpTo(index) {
+      index = Math.min(index, this.targetSegIndex);
       while (!this.segments.length || this.segments[this.segments.length - 1].index < index) {
         this.genNextSegment();
       }
@@ -749,7 +750,12 @@
 
       const throttle = (keys.has("ArrowUp") || keys.has("KeyW")) ? 1 : (keys.has("ArrowDown") || keys.has("KeyS")) ? -1 : 0;
       const cruise = baseSpeed(Game.day);
-      const targetSpeed = throttle > 0 ? cruise * 1.42 : throttle < 0 ? cruise * 0.55 : cruise;
+      let targetSpeed = throttle > 0 ? cruise * 1.42 : throttle < 0 ? cruise * 0.55 : cruise;
+      const distToEnd = this.targetZ - this.player.z;
+      if (distToEnd < STOP_ZONE) {
+        // brake to a stop as the house comes up, so the road's end is a real stop, not a fly-by
+        targetSpeed = Math.min(targetSpeed, cruise * clamp(distToEnd / STOP_ZONE, 0, 1));
+      }
       this.player.speed += (targetSpeed - this.player.speed) * clamp(dt * 3, 0, 1);
 
       let steer = 0;
@@ -760,7 +766,7 @@
       this.steer = steer;
       this.player.laneOffset = clamp(this.player.laneOffset + steer * STEER_SPEED * dt, -1500, 1500);
 
-      this.player.z += this.player.speed * dt;
+      this.player.z = Math.min(this.targetZ, this.player.z + this.player.speed * dt);
       this.ensureUpTo(Math.floor(this.player.z / SEG_LEN) + DRAW_DIST + 5);
 
       this.cars.forEach((c) => { c.z += c.vz * dt; });
@@ -779,21 +785,14 @@
         }
       }
 
-      if (!this.missed && this.player.z >= this.targetZ) {
-        const wantX = this.targetSide * (ROAD_HALF - 260);
-        if (Math.abs(this.player.laneOffset - wantX) < 340) {
-          this.finished = true;
-          this.finishTimer = 1.1;
-          const bonus = Math.max(20, Math.round(200 - (this.player.z - this.targetZ) / 4));
-          Game.score += bonus;
-          Game.popupText = "DELIVERED! +" + bonus;
-          Game.popupTimer = 1.1;
-          Audio8.success();
-        } else if (this.player.z >= this.targetZ + 260) {
-          this.missed = true;
-          loseLife("MISSED THE HOUSE!");
-          if (Game.scene === "DELIVERY") this.reset();
-        }
+      if (!this.finished && this.player.z >= this.targetZ) {
+        this.finished = true;
+        this.finishTimer = 1.3;
+        const bonus = Math.round(100 + this.targetZ / 80);
+        Game.score += bonus;
+        Game.popupText = "DELIVERED! +" + bonus;
+        Game.popupTimer = 1.3;
+        Audio8.success();
       }
     },
 
@@ -838,12 +837,12 @@
       const decos = []; // deferred so nearer ones draw over farther road strips, in far-to-near order
       for (let n = DRAW_DIST - 1; n >= 0; n--) {
         const idx = baseIndex + n;
+        if (idx > this.targetSegIndex) continue; // the road physically ends at the house
         const seg = this.segmentAt(idx);
         if (!seg) continue;
         const p1 = project(seg.x0, idx * SEG_LEN);
         const p2 = project(seg.x1, (idx + 1) * SEG_LEN);
         if (p1.y <= HORIZON || p2.y <= HORIZON) continue;
-        if (p1.y > H + 40 && p2.y > H + 40) continue;
 
         const grassColor = seg.rumble ? "#2f6b3a" : "#295f33";
         const roadColor = seg.rumble ? "#3a3a44" : "#37374a";
@@ -861,7 +860,14 @@
           quad(p1.x - lw1 / 2, p1.y, p1.x + lw1 / 2, p1.y, p2.x + lw2 / 2, p2.y, p2.x - lw2 / 2, p2.y, "#e8d9a0");
         }
 
-        if (seg.deco) decos.push({ deco: seg.deco, idx, x0: seg.x0 });
+        if (idx === this.targetSegIndex) {
+          // a hedge closing off the far end, so the road visibly stops here
+          const hw1 = p2.w * 1.2;
+          const hedgeTopY = p2.y - Math.max(2, p2.w * 0.08);
+          quad(p2.x - hw1 / 2, hedgeTopY, p2.x + hw1 / 2, hedgeTopY, p2.x + hw1 / 2, p2.y, p2.x - hw1 / 2, p2.y, "#245029");
+        }
+
+        if (seg.deco) decos.push({ deco: seg.deco, idx, x0: seg.x0, x1: seg.x1 });
         this.cars.forEach((c) => {
           if (Math.floor(c.z / SEG_LEN) === idx) decos.push({ car: c });
         });
@@ -884,22 +890,27 @@
           drawSprite(ctx, p.x - sz.w / 2, p.y - sz.h, sc, spr);
         } else {
           const deco = d.deco;
-          const margin = deco.kind === "tree" ? 260 : deco.kind === "target" ? 820 : 900;
-          const wx = d.x0 + deco.side * (ROAD_HALF + margin);
-          const p = project(wx, d.idx * SEG_LEN);
-          if (p.y <= HORIZON) return;
           if (deco.kind === "target") {
-            const sc = clamp(p.scale * 9000, 0.6, 7);
+            // the destination sits centered, right at the literal end of the road
+            const p = project(d.x1, this.targetZ);
+            if (p.y <= HORIZON) return;
+            const sc = clamp((p.scale * 1500 * X_FACTOR) / 17, 0.6, 8);
             const spr = SPRITES.houseTarget;
             const sz = spriteSize(spr, sc);
             const pulse = 0.6 + Math.sin(performance.now() / 150) * 0.4;
             ctx.save();
             ctx.shadowColor = `rgba(255,207,92,${pulse})`;
-            ctx.shadowBlur = 10 * sc;
+            ctx.shadowBlur = 12 * sc;
             drawSprite(ctx, p.x - sz.w / 2, p.y - sz.h, sc, spr);
             ctx.restore();
-            drawSprite(ctx, p.x - sz.w / 2 - 10 * sc, p.y - sz.h - 16 * sc, sc * 0.9, SPRITES.houseFlag);
-          } else if (deco.kind === "bgA" || deco.kind === "bgB") {
+            drawSprite(ctx, p.x - sz.w / 2 - 12 * sc, p.y - sz.h - 18 * sc, sc, SPRITES.houseFlag);
+            return;
+          }
+          const margin = deco.kind === "tree" ? 260 : 900;
+          const wx = d.x0 + deco.side * (ROAD_HALF + margin);
+          const p = project(wx, d.idx * SEG_LEN);
+          if (p.y <= HORIZON) return;
+          if (deco.kind === "bgA" || deco.kind === "bgB") {
             const spr = deco.kind === "bgA" ? SPRITES.houseBgA : SPRITES.houseBgB;
             const sc = clamp(p.scale * 8000, 0.4, 5.5);
             const sz = spriteSize(spr, sc);
@@ -931,8 +942,9 @@
       ctx.moveTo(barX + barW, barY - 2); ctx.lineTo(barX + barW + 5, barY + 2.5); ctx.lineTo(barX + barW, barY + 7);
       ctx.closePath(); ctx.fill();
 
-      const sideWord = this.targetSide < 0 ? "LEFT" : "RIGHT";
-      drawPanelText("To " + Game.order.customer + "'s — " + sideWord + " side!", W / 2, H - 8, 5.5, PALETTE.white, "center");
+      const distRemaining = Math.max(0, Math.round((this.targetZ - this.player.z) / 10));
+      const label = this.finished ? "Delivered!" : "To " + Game.order.customer + "'s — " + distRemaining + "m";
+      drawPanelText(label, W / 2, H - 8, 5.5, PALETTE.white, "center");
 
       // faint tap-zone hints for touch steering
       ctx.fillStyle = "rgba(244,234,208,0.10)";
