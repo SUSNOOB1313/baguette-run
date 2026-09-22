@@ -607,7 +607,7 @@
   const ROAD_HALF = 1000;      // half road width, in world units
   const RUMBLE_LEN = 3;        // segments per rumble/grass color band
   const LANES = [-620, 0, 620];
-  const CAR_HALF_W = 130, PLAYER_HALF_W = 80;
+  const CAR_HALF_W = 280, PLAYER_HALF_W = 80;
   const CAMERA_DEPTH = 1 / Math.tan((100 / 2) * Math.PI / 180);
   const CAMERA_HEIGHT = 1000;
   const DRAW_DIST = 130;       // segments rendered each frame
@@ -884,7 +884,7 @@
           drawSprite(ctx, p.x - sz.w / 2, p.y - sz.h, sc, spr);
         } else {
           const deco = d.deco;
-          const margin = deco.kind === "tree" ? 170 : deco.kind === "target" ? 520 : 480;
+          const margin = deco.kind === "tree" ? 260 : deco.kind === "target" ? 820 : 900;
           const wx = d.x0 + deco.side * (ROAD_HALF + margin);
           const p = project(wx, d.idx * SEG_LEN);
           if (p.y <= HORIZON) return;
