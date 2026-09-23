@@ -273,6 +273,29 @@
   window.addEventListener("pointerup", (e) => { if (e.pointerId === activePointerId) { steerPointer = 0; activePointerId = null; } });
   window.addEventListener("pointercancel", () => { steerPointer = 0; activePointerId = null; });
 
+  // Drag-to-roll for the Shop's SHAPE step: dragging back and forth over the dough
+  // rolls it out, same as clicking the ROLL DOUGH button but more tactile.
+  let shapeDragActive = false;
+  let shapeDragLastX = 0;
+  const SHAPE_DRAG_RECT = { x: 140, y: 40, w: 170, h: 100 };
+  canvas.addEventListener("pointerdown", (e) => {
+    if (Game.scene !== "SHOP" || Shop.step !== "SHAPE") return;
+    const p = canvasPointFromEvent(e);
+    if (p.x < SHAPE_DRAG_RECT.x || p.x > SHAPE_DRAG_RECT.x + SHAPE_DRAG_RECT.w) return;
+    if (p.y < SHAPE_DRAG_RECT.y || p.y > SHAPE_DRAG_RECT.y + SHAPE_DRAG_RECT.h) return;
+    shapeDragActive = true;
+    shapeDragLastX = p.x;
+  });
+  window.addEventListener("pointermove", (e) => {
+    if (!shapeDragActive) return;
+    const p = canvasPointFromEvent(e);
+    const dx = p.x - shapeDragLastX;
+    shapeDragLastX = p.x;
+    Shop.addShapeProgress(Math.abs(dx) * 0.01);
+  });
+  window.addEventListener("pointerup", () => { shapeDragActive = false; });
+  window.addEventListener("pointercancel", () => { shapeDragActive = false; });
+
   let buttons = []; // active clickable regions for current scene: {x,y,w,h,label,sub,onClick,disabled,style}
   function addButton(b) { buttons.push(b); return b; }
 
@@ -407,6 +430,7 @@
     bakeResult: null, // 'perfect' | 'good' | 'burnt' | 'raw'
     selectedToppings: [],
     wobble: 0,
+    shapeProgress: 0,
     reset() {
       this.step = "KNEAD";
       this.bakeNeedle = 0;
@@ -415,6 +439,15 @@
       this.bakeResult = null;
       this.selectedToppings = [];
       this.wobble = 0;
+      this.shapeProgress = 0;
+    },
+    addShapeProgress(amount) {
+      if (this.step !== "SHAPE" || this.shapeProgress >= 1) return;
+      this.shapeProgress = clamp(this.shapeProgress + amount, 0, 1);
+      if (this.shapeProgress >= 1) {
+        Audio8.click();
+        this.step = "BAKE";
+      }
     },
     update(dt) {
       this.wobble += dt;
@@ -498,7 +531,8 @@
       if (this.step === "KNEAD" ) {
         drawDoughBlob(wx + 20, wy + 10 + bob);
       } else if (this.step === "SHAPE") {
-        drawDoughLoaf(wx + 10, wy + 6 + bob);
+        drawDoughShaping(wx + 50, wy + 30 + bob, this.shapeProgress);
+        drawShapeGauge(150, 104, this.shapeProgress);
       } else if (this.step === "BAKE") {
         drawOvenScene(wx, wy);
       } else {
@@ -521,7 +555,11 @@
       if (this.step === "KNEAD") {
         addButton({ x: 260, y: 60, w: 110, h: 34, label: "KNEAD DOUGH", onClick: () => { Audio8.click(); this.step = "SHAPE"; } });
       } else if (this.step === "SHAPE") {
-        addButton({ x: 260, y: 60, w: 110, h: 34, label: "SHAPE LOAF", onClick: () => { Audio8.click(); this.step = "BAKE"; } });
+        addButton({
+          x: 260, y: 60, w: 110, h: 34, label: "ROLL DOUGH",
+          sub: Math.round(this.shapeProgress * 100) + "%",
+          onClick: () => this.addShapeProgress(0.22),
+        });
       } else if (this.step === "BAKE") {
         drawBakeGauge(150, 130);
         addButton({ x: 260, y: 60, w: 110, h: 34, label: "PULL FROM OVEN!", onClick: () => this.pullFromOven() });
@@ -563,11 +601,23 @@
     }
     ctx.beginPath(); ctx.arc(x, y + 20, 22, 0, Math.PI * 2); ctx.fill();
   }
-  function drawDoughLoaf(x, y) {
+  function drawDoughShaping(cx, cy, progress) {
+    // interpolates from a round ball (progress 0) to a stretched loaf (progress 1)
+    const bodyLen = progress * 100;
+    const radius = 22 - progress * 9;
     ctx.fillStyle = PALETTE.dough;
-    ctx.fillRect(x, y + 10, 100, 26);
-    ctx.beginPath(); ctx.arc(x, y + 23, 13, 0, Math.PI * 2); ctx.fill();
-    ctx.beginPath(); ctx.arc(x + 100, y + 23, 13, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.arc(cx - bodyLen / 2, cy, radius, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.arc(cx + bodyLen / 2, cy, radius, 0, Math.PI * 2); ctx.fill();
+    if (bodyLen > 0) ctx.fillRect(cx - bodyLen / 2, cy - radius, bodyLen, radius * 2);
+  }
+  function drawShapeGauge(x, y, progress) {
+    const w = 190, h = 10;
+    ctx.fillStyle = "#241a12";
+    ctx.fillRect(x, y, w, h);
+    ctx.fillStyle = PALETTE.yellow;
+    ctx.fillRect(x, y, w * progress, h);
+    ctx.strokeStyle = PALETTE.ink;
+    ctx.strokeRect(x, y, w, h);
   }
   function drawOvenScene(x, y) {
     ctx.fillStyle = "#1a1210";
