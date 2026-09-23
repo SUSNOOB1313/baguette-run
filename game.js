@@ -273,28 +273,29 @@
   window.addEventListener("pointerup", (e) => { if (e.pointerId === activePointerId) { steerPointer = 0; activePointerId = null; } });
   window.addEventListener("pointercancel", () => { steerPointer = 0; activePointerId = null; });
 
-  // Drag-to-roll for the Shop's SHAPE step: dragging back and forth over the dough
-  // rolls it out, same as clicking the ROLL DOUGH button but more tactile.
-  let shapeDragActive = false;
-  let shapeDragLastX = 0;
-  const SHAPE_DRAG_RECT = { x: 140, y: 40, w: 170, h: 100 };
+  // Free-form dough sculpting for the Shop's SHAPE step: the dough is a ring of
+  // grabbable control points, and any one of them can be picked up and dragged
+  // to pull that part of the dough toward (or away from) a baguette shape.
+  const SHAPE_GRAB_R = 20;
   canvas.addEventListener("pointerdown", (e) => {
     if (Game.scene !== "SHOP" || Shop.step !== "SHAPE") return;
     const p = canvasPointFromEvent(e);
-    if (p.x < SHAPE_DRAG_RECT.x || p.x > SHAPE_DRAG_RECT.x + SHAPE_DRAG_RECT.w) return;
-    if (p.y < SHAPE_DRAG_RECT.y || p.y > SHAPE_DRAG_RECT.y + SHAPE_DRAG_RECT.h) return;
-    shapeDragActive = true;
-    shapeDragLastX = p.x;
+    let bestI = -1, bestD = SHAPE_GRAB_R;
+    Shop.shapePoints.forEach((pt, i) => {
+      const d = Math.hypot(pt.x - p.x, pt.y - p.y);
+      if (d < bestD) { bestD = d; bestI = i; }
+    });
+    if (bestI >= 0) Shop.shapeDragIndex = bestI;
   });
   window.addEventListener("pointermove", (e) => {
-    if (!shapeDragActive) return;
+    if (Shop.shapeDragIndex < 0) return;
     const p = canvasPointFromEvent(e);
-    const dx = p.x - shapeDragLastX;
-    shapeDragLastX = p.x;
-    Shop.addShapeProgress(Math.abs(dx) * 0.01);
+    const pt = Shop.shapePoints[Shop.shapeDragIndex];
+    pt.x = clamp(p.x, 120, 250);
+    pt.y = clamp(p.y, 38, 118);
   });
-  window.addEventListener("pointerup", () => { shapeDragActive = false; });
-  window.addEventListener("pointercancel", () => { shapeDragActive = false; });
+  window.addEventListener("pointerup", () => { Shop.shapeDragIndex = -1; });
+  window.addEventListener("pointercancel", () => { Shop.shapeDragIndex = -1; });
 
   let buttons = []; // active clickable regions for current scene: {x,y,w,h,label,sub,onClick,disabled,style}
   function addButton(b) { buttons.push(b); return b; }
@@ -422,6 +423,35 @@
   // ---------------------------------------------------------
   // SHOP SCENE
   // ---------------------------------------------------------
+  // The SHAPE step models the dough as a ring of draggable control points.
+  // Point i starts on a circle (round dough ball) and has a fixed target on a
+  // capsule outline (baguette silhouette), both sampled along the SAME ray
+  // angle from the shared center. That keeps each point's target in the same
+  // rough direction as its start (the point on the right side of the ball
+  // targets the right tip, not some other part of the outline), so dragging
+  // a handle toward the nearest bit of the ghost outline is always correct.
+  const SHAPE_N = 10;
+  const SHAPE_CENTER = { x: 195, y: 78 };
+  const SHAPE_CIRCLE_R = 26;
+  const SHAPE_CAP_HALF = 40;
+  const SHAPE_CAP_R = 12;
+  function circlePointAtAngle(theta, cx, cy, r) {
+    return { x: cx + r * Math.cos(theta), y: cy + r * Math.sin(theta) };
+  }
+  function capsulePointAtAngle(theta, cx, cy, halfLen, r) {
+    const ux = Math.cos(theta), uy = Math.sin(theta);
+    if (Math.abs(uy) > 1e-6) {
+      const tEdge = r / Math.abs(uy);
+      const xAt = tEdge * ux;
+      if (Math.abs(xAt) <= halfLen) return { x: cx + xAt, y: cy + Math.sign(uy) * r };
+    }
+    // otherwise the ray exits through one of the rounded end caps
+    const s = ux >= 0 ? 1 : -1;
+    const k = ux * s * halfLen;
+    const t = k + Math.sqrt(Math.max(0, k * k - (halfLen * halfLen - r * r)));
+    return { x: cx + t * ux, y: cy + t * uy };
+  }
+
   const Shop = {
     step: "KNEAD", // KNEAD -> SHAPE -> BAKE -> TOP -> WRAP -> DONE
     bakeNeedle: 0,
@@ -430,7 +460,11 @@
     bakeResult: null, // 'perfect' | 'good' | 'burnt' | 'raw'
     selectedToppings: [],
     wobble: 0,
-    shapeProgress: 0,
+    shapePoints: [],
+    shapeTargets: [],
+    shapeInitDist: [],
+    shapeDragIndex: -1,
+    shapeAccuracy: 0,
     reset() {
       this.step = "KNEAD";
       this.bakeNeedle = 0;
@@ -439,18 +473,32 @@
       this.bakeResult = null;
       this.selectedToppings = [];
       this.wobble = 0;
-      this.shapeProgress = 0;
-    },
-    addShapeProgress(amount) {
-      if (this.step !== "SHAPE" || this.shapeProgress >= 1) return;
-      this.shapeProgress = clamp(this.shapeProgress + amount, 0, 1);
-      if (this.shapeProgress >= 1) {
-        Audio8.click();
-        this.step = "BAKE";
+      this.shapeDragIndex = -1;
+      this.shapeAccuracy = 0;
+      this.shapePoints = [];
+      this.shapeTargets = [];
+      this.shapeInitDist = [];
+      for (let i = 0; i < SHAPE_N; i++) {
+        const theta = (i / SHAPE_N) * Math.PI * 2;
+        const start = circlePointAtAngle(theta, SHAPE_CENTER.x, SHAPE_CENTER.y, SHAPE_CIRCLE_R);
+        const target = capsulePointAtAngle(theta, SHAPE_CENTER.x, SHAPE_CENTER.y, SHAPE_CAP_HALF, SHAPE_CAP_R);
+        this.shapePoints.push({ x: start.x, y: start.y });
+        this.shapeTargets.push(target);
+        this.shapeInitDist.push(Math.max(1, Math.hypot(start.x - target.x, start.y - target.y)));
       }
+    },
+    updateShapeAccuracy() {
+      let sum = 0;
+      for (let i = 0; i < this.shapePoints.length; i++) {
+        const p = this.shapePoints[i], t = this.shapeTargets[i];
+        const d = Math.hypot(p.x - t.x, p.y - t.y);
+        sum += clamp(1 - d / this.shapeInitDist[i], 0, 1);
+      }
+      this.shapeAccuracy = this.shapePoints.length ? Math.round((sum / this.shapePoints.length) * 100) : 0;
     },
     update(dt) {
       this.wobble += dt;
+      if (this.step === "SHAPE") this.updateShapeAccuracy();
       if (this.step === "BAKE") {
         this.bakeNeedle += this.bakeDir * this.bakeSpeed * dt;
         if (this.bakeNeedle > 1) { this.bakeNeedle = 1; this.bakeDir = -1; }
@@ -485,7 +533,8 @@
       want.forEach((t) => { if (!got.has(t)) mismatches++; });
       got.forEach((t) => { if (!want.has(t)) mismatches++; });
       const bakeRank = { perfect: 3, good: 2, raw: 1, burnt: 1 }[this.bakeResult];
-      let rank = bakeRank - mismatches;
+      const shapeRank = this.shapeAccuracy >= 85 ? 3 : this.shapeAccuracy >= 60 ? 2 : this.shapeAccuracy >= 30 ? 1 : 0;
+      let rank = Math.round((bakeRank + shapeRank) / 2) - mismatches;
       rank = clamp(rank, 0, 3);
       const labels = ["RUINED", "OKAY", "GOOD", "PERFECT"];
       const points = [10, 40, 75, 120];
@@ -531,8 +580,11 @@
       if (this.step === "KNEAD" ) {
         drawDoughBlob(wx + 20, wy + 10 + bob);
       } else if (this.step === "SHAPE") {
-        drawDoughShaping(wx + 50, wy + 30 + bob, this.shapeProgress);
-        drawShapeGauge(150, 104, this.shapeProgress);
+        drawShapeTargetGhost(this.shapeTargets);
+        drawDoughSculpt(this.shapePoints, this.shapeDragIndex);
+        drawShapeGauge(150, 108, this.shapeAccuracy / 100);
+        drawPanelText("ACCURACY " + this.shapeAccuracy + "%", 150, 120, 6,
+          this.shapeAccuracy >= 85 ? PALETTE.green : this.shapeAccuracy >= 60 ? PALETTE.yellow : PALETTE.red);
       } else if (this.step === "BAKE") {
         drawOvenScene(wx, wy);
       } else {
@@ -556,9 +608,9 @@
         addButton({ x: 260, y: 60, w: 110, h: 34, label: "KNEAD DOUGH", onClick: () => { Audio8.click(); this.step = "SHAPE"; } });
       } else if (this.step === "SHAPE") {
         addButton({
-          x: 260, y: 60, w: 110, h: 34, label: "ROLL DOUGH",
-          sub: Math.round(this.shapeProgress * 100) + "%",
-          onClick: () => this.addShapeProgress(0.22),
+          x: 260, y: 60, w: 110, h: 34, label: "BAKE IT!",
+          sub: this.shapeAccuracy + "% shaped",
+          onClick: () => { Audio8.click(); this.step = "BAKE"; },
         });
       } else if (this.step === "BAKE") {
         drawBakeGauge(150, 130);
@@ -601,14 +653,32 @@
     }
     ctx.beginPath(); ctx.arc(x, y + 20, 22, 0, Math.PI * 2); ctx.fill();
   }
-  function drawDoughShaping(cx, cy, progress) {
-    // interpolates from a round ball (progress 0) to a stretched loaf (progress 1)
-    const bodyLen = progress * 100;
-    const radius = 22 - progress * 9;
+  function drawDoughSculpt(points, dragIndex) {
     ctx.fillStyle = PALETTE.dough;
-    ctx.beginPath(); ctx.arc(cx - bodyLen / 2, cy, radius, 0, Math.PI * 2); ctx.fill();
-    ctx.beginPath(); ctx.arc(cx + bodyLen / 2, cy, radius, 0, Math.PI * 2); ctx.fill();
-    if (bodyLen > 0) ctx.fillRect(cx - bodyLen / 2, cy - radius, bodyLen, radius * 2);
+    ctx.beginPath();
+    points.forEach((p, i) => { if (i === 0) ctx.moveTo(p.x, p.y); else ctx.lineTo(p.x, p.y); });
+    ctx.closePath();
+    ctx.fill();
+    ctx.strokeStyle = PALETTE.crust;
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+    points.forEach((p, i) => {
+      ctx.fillStyle = i === dragIndex ? PALETTE.yellow : "rgba(138,82,34,0.85)";
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, i === dragIndex ? 4.5 : 3, 0, Math.PI * 2);
+      ctx.fill();
+    });
+  }
+  function drawShapeTargetGhost(targets) {
+    ctx.save();
+    ctx.strokeStyle = "rgba(255,207,92,0.55)";
+    ctx.lineWidth = 1.5;
+    ctx.setLineDash([4, 3]);
+    ctx.beginPath();
+    targets.forEach((p, i) => { if (i === 0) ctx.moveTo(p.x, p.y); else ctx.lineTo(p.x, p.y); });
+    ctx.closePath();
+    ctx.stroke();
+    ctx.restore();
   }
   function drawShapeGauge(x, y, progress) {
     const w = 190, h = 10;
