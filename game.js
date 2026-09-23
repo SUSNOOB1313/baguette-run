@@ -432,9 +432,6 @@
   // a handle toward the nearest bit of the ghost outline is always correct.
   const SHAPE_N = 10;
   const SHAPE_CENTER = { x: 195, y: 78 };
-  const SHAPE_CIRCLE_R = 26;
-  const SHAPE_CAP_HALF = 40;
-  const SHAPE_CAP_R = 12;
   function circlePointAtAngle(theta, cx, cy, r) {
     return { x: cx + r * Math.cos(theta), y: cy + r * Math.sin(theta) };
   }
@@ -478,10 +475,16 @@
       this.shapePoints = [];
       this.shapeTargets = [];
       this.shapeInitDist = [];
+      // A different target baguette (length/thickness) every order, so the
+      // silhouette to sculpt toward isn't always the same shape. capR+capHalf
+      // is kept <=52 so the outline always fits the draggable panel bounds.
+      const capR = rand(9, 16);
+      const capHalf = rand(24, 52 - capR);
+      const circleR = rand(20, 28);
       for (let i = 0; i < SHAPE_N; i++) {
         const theta = (i / SHAPE_N) * Math.PI * 2;
-        const start = circlePointAtAngle(theta, SHAPE_CENTER.x, SHAPE_CENTER.y, SHAPE_CIRCLE_R);
-        const target = capsulePointAtAngle(theta, SHAPE_CENTER.x, SHAPE_CENTER.y, SHAPE_CAP_HALF, SHAPE_CAP_R);
+        const start = circlePointAtAngle(theta, SHAPE_CENTER.x, SHAPE_CENTER.y, circleR);
+        const target = capsulePointAtAngle(theta, SHAPE_CENTER.x, SHAPE_CENTER.y, capHalf, capR);
         this.shapePoints.push({ x: start.x, y: start.y });
         this.shapeTargets.push(target);
         this.shapeInitDist.push(Math.max(1, Math.hypot(start.x - target.x, start.y - target.y)));
