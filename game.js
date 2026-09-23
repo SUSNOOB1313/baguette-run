@@ -756,6 +756,7 @@
   const Y_FACTOR = 26000 * (CAMERA_HEIGHT / 1000);
   const STEER_SPEED = 1950;
   const STOP_ZONE = 1300;      // world units before the house where the bike brakes to a stop
+  const ROAD_LIMIT = ROAD_HALF - PLAYER_HALF_W; // how far off-center the bike can steer, keeping it on the pavement
   function baseSpeed(day) { return 2350 + Math.min(day, 12) * 120; }
 
   const Delivery = {
@@ -904,7 +905,7 @@
       if (steerPointer) steer += steerPointer;
       steer = clamp(steer, -1, 1);
       this.steer = steer;
-      this.player.laneOffset = clamp(this.player.laneOffset + steer * STEER_SPEED * dt, -1500, 1500);
+      this.player.laneOffset = clamp(this.player.laneOffset + steer * STEER_SPEED * dt, -ROAD_LIMIT, ROAD_LIMIT);
 
       this.player.z = Math.min(this.targetZ, this.player.z + this.player.speed * dt);
       this.ensureUpTo(Math.floor(this.player.z / SEG_LEN) + DRAW_DIST + 5);
