@@ -424,30 +424,37 @@
   // SHOP SCENE
   // ---------------------------------------------------------
   // The SHAPE step models the dough as a ring of draggable control points.
-  // Point i starts on a circle (round dough ball) and has a fixed target on a
-  // capsule outline (baguette silhouette), both sampled along the SAME ray
-  // angle from the shared center. That keeps each point's target in the same
-  // rough direction as its start (the point on the right side of the ball
-  // targets the right tip, not some other part of the outline), so dragging
-  // a handle toward the nearest bit of the ghost outline is always correct.
+  // Point i starts on a circle (round dough ball) and has a fixed target on
+  // an outline for whichever bread shape was picked this order, both sampled
+  // along the SAME ray angle from the shared center. That keeps each point's
+  // target in the same rough direction as its start (the point on the right
+  // side of the ball targets the right tip, not some other part of the
+  // outline), so dragging a handle toward the nearest bit of the ghost
+  // outline is always correct, whatever the target shape looks like.
   const SHAPE_N = 10;
   const SHAPE_CENTER = { x: 195, y: 78 };
   function circlePointAtAngle(theta, cx, cy, r) {
     return { x: cx + r * Math.cos(theta), y: cy + r * Math.sin(theta) };
   }
-  function capsulePointAtAngle(theta, cx, cy, halfLen, r) {
-    const ux = Math.cos(theta), uy = Math.sin(theta);
-    if (Math.abs(uy) > 1e-6) {
-      const tEdge = r / Math.abs(uy);
-      const xAt = tEdge * ux;
-      if (Math.abs(xAt) <= halfLen) return { x: cx + xAt, y: cy + Math.sign(uy) * r };
-    }
-    // otherwise the ray exits through one of the rounded end caps
-    const s = ux >= 0 ? 1 : -1;
-    const k = ux * s * halfLen;
-    const t = k + Math.sqrt(Math.max(0, k * k - (halfLen * halfLen - r * r)));
-    return { x: cx + t * ux, y: cy + t * uy };
+  // A superellipse boundary sampled by ray angle: |x/a|^n + |y/b|^n = 1.
+  // One formula reproduces every target silhouette just by varying a, b, n —
+  // a high n gives flat sides and rounded ends (a baguette/batard), n=2 with
+  // a=b gives a perfect circle (a boule), and a low n pulls the ends into
+  // points (a torpedo roll).
+  function superellipsePointAtAngle(theta, cx, cy, a, b, n) {
+    const c = Math.abs(Math.cos(theta)), s = Math.abs(Math.sin(theta));
+    const r = Math.pow(Math.pow(c / a, n) + Math.pow(s / b, n), -1 / n);
+    return { x: cx + r * Math.cos(theta), y: cy + r * Math.sin(theta) };
   }
+  // Each order picks one of these bread shapes to sculpt toward. a = half
+  // length (horizontal reach from center), b = half thickness (vertical
+  // reach) — both kept within the draggable panel's bounds for every preset.
+  const SHAPE_TYPES = [
+    { name: "Baguette", n: 4.5, aMin: 32, aMax: 48, bMin: 8, bMax: 13 },
+    { name: "Batard", n: 2.6, aMin: 20, aMax: 32, bMin: 13, bMax: 19 },
+    { name: "Boule", n: 2, round: true, aMin: 18, aMax: 26, bMin: 18, bMax: 26 },
+    { name: "Torpedo Roll", n: 1.55, aMin: 26, aMax: 40, bMin: 9, bMax: 15 },
+  ];
 
   const Shop = {
     step: "KNEAD", // KNEAD -> SHAPE -> BAKE -> TOP -> WRAP -> DONE
@@ -462,6 +469,7 @@
     shapeInitDist: [],
     shapeDragIndex: -1,
     shapeAccuracy: 0,
+    shapeTypeName: "Baguette",
     reset() {
       this.step = "KNEAD";
       this.bakeNeedle = 0;
@@ -475,16 +483,17 @@
       this.shapePoints = [];
       this.shapeTargets = [];
       this.shapeInitDist = [];
-      // A different target baguette (length/thickness) every order, so the
-      // silhouette to sculpt toward isn't always the same shape. capR+capHalf
-      // is kept <=52 so the outline always fits the draggable panel bounds.
-      const capR = rand(9, 16);
-      const capHalf = rand(24, 52 - capR);
+      // A different bread shape every order — not just a different size, but
+      // a different silhouette family (baguette/batard/boule/torpedo roll).
+      const type = choice(SHAPE_TYPES);
+      this.shapeTypeName = type.name;
+      const a = rand(type.aMin, type.aMax);
+      const b = type.round ? a : rand(type.bMin, type.bMax);
       const circleR = rand(20, 28);
       for (let i = 0; i < SHAPE_N; i++) {
         const theta = (i / SHAPE_N) * Math.PI * 2;
         const start = circlePointAtAngle(theta, SHAPE_CENTER.x, SHAPE_CENTER.y, circleR);
-        const target = capsulePointAtAngle(theta, SHAPE_CENTER.x, SHAPE_CENTER.y, capHalf, capR);
+        const target = superellipsePointAtAngle(theta, SHAPE_CENTER.x, SHAPE_CENTER.y, a, b, type.n);
         this.shapePoints.push({ x: start.x, y: start.y });
         this.shapeTargets.push(target);
         this.shapeInitDist.push(Math.max(1, Math.hypot(start.x - target.x, start.y - target.y)));
@@ -582,13 +591,17 @@
 
       // Working baguette preview area
       const wx = 150, wy = 50;
-      drawPanelText("YOUR BAGUETTE", wx, 26, 7, PALETTE.white);
+      const panelLabel = this.step === "SHAPE" ? "FORM A " + this.shapeTypeName.toUpperCase() : "YOUR BAGUETTE";
+      drawPanelText(panelLabel, wx, 26, this.step === "SHAPE" ? 6 : 7, PALETTE.white);
       const bob = this.step !== "BAKE" ? Math.sin(this.wobble * 4) * 1.5 : 0;
       if (this.step === "KNEAD" ) {
         drawDoughBlob(wx + 20, wy + 10 + bob);
       } else if (this.step === "SHAPE") {
-        drawShapeTargetGhost(this.shapeTargets);
+        // dough first, ghost outline drawn on top (stroke-only, so it stays
+        // visible as a guide even where the target sits inside the dough,
+        // e.g. a small torpedo roll target next to a bigger starting ball)
         drawDoughSculpt(this.shapePoints, this.shapeDragIndex);
+        drawShapeTargetGhost(this.shapeTargets);
         drawShapeGauge(150, 108, this.shapeAccuracy / 100);
         drawPanelText("ACCURACY " + this.shapeAccuracy + "%", 150, 120, 6,
           this.shapeAccuracy >= 70 ? PALETTE.green : this.shapeAccuracy >= 45 ? PALETTE.yellow : PALETTE.red);
