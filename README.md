@@ -13,8 +13,9 @@ No build step, no dependencies — just open `index.html` in a browser
 **Shop phase**
 1. Read the order card (customer + requested toppings).
 2. Click through **Knead Dough** → **Shape Loaf**.
-3. Watch the bake gauge and click **Pull From Oven!** when the needle
-   is in the golden zone — too early is raw, too late is burnt.
+3. Press **O** to open the oven, then watch the bake gauge and press
+   **B** to bake when the needle is in the golden zone — too early is
+   raw, too late is burnt.
 4. Toggle the toppings that match the order, then **Wrap & Go**.
 
 **Delivery phase — first-person street ride**

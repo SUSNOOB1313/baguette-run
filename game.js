@@ -462,6 +462,7 @@
     bakeDir: 1,
     bakeSpeed: 1.7,
     bakeResult: null, // 'perfect' | 'good' | 'burnt' | 'raw'
+    ovenOpen: false,
     selectedToppings: [],
     wobble: 0,
     shapePoints: [],
@@ -476,6 +477,7 @@
       this.bakeDir = 1;
       this.bakeSpeed = 1.6 + Game.day * 0.15;
       this.bakeResult = null;
+      this.ovenOpen = false;
       this.selectedToppings = [];
       this.wobble = 0;
       this.shapeDragIndex = -1;
@@ -515,13 +517,19 @@
     update(dt) {
       this.wobble += dt;
       if (this.step === "SHAPE") this.updateShapeAccuracy();
-      if (this.step === "BAKE") {
+      if (this.step === "BAKE" && this.ovenOpen) {
         this.bakeNeedle += this.bakeDir * this.bakeSpeed * dt;
         if (this.bakeNeedle > 1) { this.bakeNeedle = 1; this.bakeDir = -1; }
         if (this.bakeNeedle < 0) { this.bakeNeedle = 0; this.bakeDir = 1; }
       }
     },
+    openOven() {
+      if (this.step !== "BAKE" || this.ovenOpen) return;
+      this.ovenOpen = true;
+      Audio8.toggle();
+    },
     pullFromOven() {
+      if (this.step !== "BAKE" || !this.ovenOpen) return;
       const n = this.bakeNeedle;
       // Perfect zone centered ~0.62 (golden brown), width tuned by day (harder = narrower)
       const center = 0.62;
@@ -606,7 +614,7 @@
         drawPanelText("ACCURACY " + this.shapeAccuracy + "%", 150, 120, 6,
           this.shapeAccuracy >= 70 ? PALETTE.green : this.shapeAccuracy >= 45 ? PALETTE.yellow : PALETTE.red);
       } else if (this.step === "BAKE") {
-        drawOvenScene(wx, wy);
+        drawOvenScene(wx, wy, this.ovenOpen);
       } else {
         const sc = 3;
         const size = spriteSize(SPRITES.baguetteBare, sc);
@@ -634,7 +642,13 @@
         });
       } else if (this.step === "BAKE") {
         drawBakeGauge(150, 130);
-        addButton({ x: 260, y: 60, w: 110, h: 34, label: "PULL FROM OVEN!", onClick: () => this.pullFromOven() });
+        if (!this.ovenOpen) {
+          drawPanelText("PRESS O TO OPEN OVEN", 150, 116, 6, PALETTE.yellow);
+          addButton({ x: 260, y: 60, w: 110, h: 34, label: "OPEN OVEN", sub: "(O)", onClick: () => this.openOven() });
+        } else {
+          drawPanelText("PRESS B TO BAKE!", 150, 116, 6, PALETTE.yellow);
+          addButton({ x: 260, y: 60, w: 110, h: 34, label: "BAKE IT!", sub: "(B)", onClick: () => this.pullFromOven() });
+        }
       } else if (this.step === "TOP") {
         drawPanelText("Result: " + this.bakeResult.toUpperCase(), 150, 96, 6, this.bakeResult === "perfect" ? PALETTE.green : (this.bakeResult === "good" ? PALETTE.yellow : PALETTE.red));
         drawPanelText("ADD TOPPINGS TO MATCH:", 14, 108, 6, PALETTE.white);
@@ -709,12 +723,25 @@
     ctx.strokeStyle = PALETTE.ink;
     ctx.strokeRect(x, y, w, h);
   }
-  function drawOvenScene(x, y) {
+  function drawOvenScene(x, y, open) {
     ctx.fillStyle = "#1a1210";
     ctx.fillRect(x, y + 4, 130, 60);
     ctx.strokeStyle = PALETTE.yellow;
     ctx.lineWidth = 3;
     ctx.strokeRect(x + 4, y + 8, 122, 52);
+    if (!open) {
+      // Closed oven door: solid panel with a small window and handle.
+      ctx.fillStyle = "#3a2a1e";
+      ctx.fillRect(x + 8, y + 12, 114, 44);
+      ctx.fillStyle = "#241a12";
+      ctx.fillRect(x + 22, y + 20, 86, 24);
+      const flick = 0.5 + Math.abs(Math.sin(performance.now() / 90)) * 0.5;
+      ctx.fillStyle = `rgba(255,140,40,${flick * 0.6})`;
+      ctx.fillRect(x + 24, y + 22, 82, 20);
+      ctx.fillStyle = PALETTE.yellow;
+      ctx.fillRect(x + 100, y + 30, 14, 4);
+      return;
+    }
     const flick = 0.5 + Math.abs(Math.sin(performance.now() / 90)) * 0.5;
     ctx.fillStyle = `rgba(255,140,40,${flick})`;
     ctx.fillRect(x + 10, y + 48, 110, 8);
@@ -1208,6 +1235,10 @@
     }
     if (e.code === "Enter" && Game.scene === "TITLE") { Audio8.start(); resetGame(); }
     if (e.code === "Enter" && Game.scene === "GAMEOVER") { Audio8.start(); resetGame(); }
+    if (Game.scene === "SHOP" && Shop.step === "BAKE") {
+      if (e.code === "KeyO") Shop.openOven();
+      if (e.code === "KeyB") Shop.pullFromOven();
+    }
   });
 
   let last = performance.now();
