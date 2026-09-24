@@ -888,7 +888,7 @@
       this.steer = 0;
       this.finished = false;
       this.finishTimer = 0;
-      this.targetZ = 17000 + Game.day * 1400 + rand(0, 4500);
+      this.targetZ = 34000 + Game.day * 2800 + rand(0, 9000);
       this.targetSegIndex = Math.floor(this.targetZ / SEG_LEN);
       this.ensureUpTo(Math.floor(this.player.z / SEG_LEN) + DRAW_DIST + 5);
     },
