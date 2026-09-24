@@ -276,7 +276,7 @@
   // Free-form dough sculpting for the Shop's SHAPE step: the dough is a ring of
   // grabbable control points, and any one of them can be picked up and dragged
   // to pull that part of the dough toward (or away from) a baguette shape.
-  const SHAPE_GRAB_R = 26;
+  const SHAPE_GRAB_R = 34;
   canvas.addEventListener("pointerdown", (e) => {
     if (Game.scene !== "SHOP" || Shop.step !== "SHAPE") return;
     const p = canvasPointFromEvent(e);
@@ -512,11 +512,11 @@
       for (let i = 0; i < this.shapePoints.length; i++) {
         const p = this.shapePoints[i], t = this.shapeTargets[i];
         const d = Math.hypot(p.x - t.x, p.y - t.y);
-        // A concave falloff instead of a straight line: closing most of the
-        // gap to a target already earns most of the credit, so the score
-        // doesn't demand pixel-perfect placement on every single point.
+        // A steeply concave falloff: even roughly nudging a point toward its
+        // target earns most of the credit, so the score is very forgiving
+        // about exact placement.
         const r = clamp(d / this.shapeInitDist[i], 0, 4);
-        sum += clamp(1 - Math.pow(r, 1.8), 0, 1);
+        sum += clamp(1 - Math.pow(r, 3.2), 0, 1);
       }
       this.shapeAccuracy = this.shapePoints.length ? Math.round((sum / this.shapePoints.length) * 100) : 0;
     },
@@ -580,7 +580,7 @@
       want.forEach((t) => { if (!got.has(t)) mismatches++; });
       got.forEach((t) => { if (!want.has(t)) mismatches++; });
       const bakeRank = { perfect: 3, good: 2, raw: 1, burnt: 1 }[this.bakeResult];
-      const shapeRank = this.shapeAccuracy >= 70 ? 3 : this.shapeAccuracy >= 45 ? 2 : this.shapeAccuracy >= 20 ? 1 : 0;
+      const shapeRank = this.shapeAccuracy >= 55 ? 3 : this.shapeAccuracy >= 35 ? 2 : this.shapeAccuracy >= 15 ? 1 : 0;
       let rank = Math.round((bakeRank + shapeRank) / 2) - mismatches;
       rank = clamp(rank, 0, 3);
       const labels = ["RUINED", "OKAY", "GOOD", "PERFECT"];
@@ -635,7 +635,7 @@
         drawShapeTargetGhost(this.shapeTargets);
         drawShapeGauge(150, 108, this.shapeAccuracy / 100);
         drawPanelText("ACCURACY " + this.shapeAccuracy + "%", 150, 120, 6,
-          this.shapeAccuracy >= 70 ? PALETTE.green : this.shapeAccuracy >= 45 ? PALETTE.yellow : PALETTE.red);
+          this.shapeAccuracy >= 55 ? PALETTE.green : this.shapeAccuracy >= 35 ? PALETTE.yellow : PALETTE.red);
       } else if (this.step === "BAKE") {
         drawOvenScene(wx, wy, this.ovenOpen, this.ovenAnimPhase, this.ovenAnimT);
       } else {
