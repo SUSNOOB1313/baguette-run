@@ -463,6 +463,9 @@
     bakeSpeed: 1.7,
     bakeResult: null, // 'perfect' | 'good' | 'burnt' | 'raw'
     ovenOpen: false,
+    ovenAnimPhase: null, // null | 'opening' | 'inserting'
+    ovenAnimT: 0,
+    ovenAnimDur: 0,
     selectedToppings: [],
     wobble: 0,
     shapePoints: [],
@@ -478,6 +481,9 @@
       this.bakeSpeed = 1.6 + Game.day * 0.15;
       this.bakeResult = null;
       this.ovenOpen = false;
+      this.ovenAnimPhase = null;
+      this.ovenAnimT = 0;
+      this.ovenAnimDur = 0;
       this.selectedToppings = [];
       this.wobble = 0;
       this.shapeDragIndex = -1;
@@ -517,15 +523,32 @@
     update(dt) {
       this.wobble += dt;
       if (this.step === "SHAPE") this.updateShapeAccuracy();
-      if (this.step === "BAKE" && this.ovenOpen) {
-        this.bakeNeedle += this.bakeDir * this.bakeSpeed * dt;
-        if (this.bakeNeedle > 1) { this.bakeNeedle = 1; this.bakeDir = -1; }
-        if (this.bakeNeedle < 0) { this.bakeNeedle = 0; this.bakeDir = 1; }
+      if (this.step === "BAKE") {
+        if (this.ovenAnimPhase) {
+          this.ovenAnimT += dt / this.ovenAnimDur;
+          if (this.ovenAnimT >= 1) {
+            if (this.ovenAnimPhase === "opening") {
+              this.ovenAnimPhase = "inserting";
+              this.ovenAnimT = 0;
+              this.ovenAnimDur = 0.8;
+            } else {
+              this.ovenAnimPhase = null;
+              this.ovenAnimT = 0;
+              this.ovenOpen = true;
+            }
+          }
+        } else if (this.ovenOpen) {
+          this.bakeNeedle += this.bakeDir * this.bakeSpeed * dt;
+          if (this.bakeNeedle > 1) { this.bakeNeedle = 1; this.bakeDir = -1; }
+          if (this.bakeNeedle < 0) { this.bakeNeedle = 0; this.bakeDir = 1; }
+        }
       }
     },
     openOven() {
-      if (this.step !== "BAKE" || this.ovenOpen) return;
-      this.ovenOpen = true;
+      if (this.step !== "BAKE" || this.ovenOpen || this.ovenAnimPhase) return;
+      this.ovenAnimPhase = "opening";
+      this.ovenAnimT = 0;
+      this.ovenAnimDur = 0.4;
       Audio8.toggle();
     },
     pullFromOven() {
@@ -614,7 +637,7 @@
         drawPanelText("ACCURACY " + this.shapeAccuracy + "%", 150, 120, 6,
           this.shapeAccuracy >= 70 ? PALETTE.green : this.shapeAccuracy >= 45 ? PALETTE.yellow : PALETTE.red);
       } else if (this.step === "BAKE") {
-        drawOvenScene(wx, wy, this.ovenOpen);
+        drawOvenScene(wx, wy, this.ovenOpen, this.ovenAnimPhase, this.ovenAnimT);
       } else {
         const sc = 3;
         const size = spriteSize(SPRITES.baguetteBare, sc);
@@ -642,7 +665,9 @@
         });
       } else if (this.step === "BAKE") {
         drawBakeGauge(150, 130);
-        if (!this.ovenOpen) {
+        if (this.ovenAnimPhase) {
+          drawPanelText(this.ovenAnimPhase === "opening" ? "OPENING OVEN..." : "LOADING BAGUETTE...", 150, 116, 6, PALETTE.yellow);
+        } else if (!this.ovenOpen) {
           drawPanelText("PRESS O TO OPEN OVEN", 150, 116, 6, PALETTE.yellow);
           addButton({ x: 260, y: 60, w: 110, h: 34, label: "OPEN OVEN", sub: "(O)", onClick: () => this.openOven() });
         } else {
@@ -723,29 +748,83 @@
     ctx.strokeStyle = PALETTE.ink;
     ctx.strokeRect(x, y, w, h);
   }
-  function drawOvenScene(x, y, open) {
+  function drawOvenDoor(x, y, frac) {
+    // Closed oven door: solid panel with a small window and handle.
+    // frac: 1 = fully closed, shrinks toward 0 as the door lifts open.
+    if (frac <= 0.02) return;
+    const doorH = 44 * frac;
+    ctx.fillStyle = "#3a2a1e";
+    ctx.fillRect(x + 8, y + 12, 114, doorH);
+    if (doorH > 16) {
+      ctx.fillStyle = "#241a12";
+      ctx.fillRect(x + 22, y + 20, 86, Math.min(24, doorH - 8));
+      const flick = 0.5 + Math.abs(Math.sin(performance.now() / 90)) * 0.5;
+      ctx.fillStyle = `rgba(255,140,40,${flick * 0.6})`;
+      ctx.fillRect(x + 24, y + 22, 82, Math.min(20, doorH - 10));
+    }
+    if (frac > 0.85) {
+      ctx.fillStyle = PALETTE.yellow;
+      ctx.fillRect(x + 100, y + 30, 14, 4);
+    }
+  }
+  function drawPeel(px, py, carrying) {
+    // A first-person peel (paddle) reaching in from the viewer's side to
+    // place the baguette, its handle trailing off toward the bottom edge.
+    ctx.fillStyle = "#8a5222";
+    ctx.fillRect(px - 3, py + 6, 6, 40);
+    ctx.fillStyle = "#c98a4b";
+    ctx.fillRect(px - 24, py - 4, 48, 8);
+    ctx.strokeStyle = PALETTE.ink;
+    ctx.lineWidth = 1;
+    ctx.strokeRect(px - 24, py - 4, 48, 8);
+    if (carrying) {
+      drawSprite(ctx, px - 18, py - 14, 2, SPRITES.baguetteBare);
+    }
+  }
+  function drawOvenScene(x, y, open, animPhase, animT) {
     ctx.fillStyle = "#1a1210";
     ctx.fillRect(x, y + 4, 130, 60);
     ctx.strokeStyle = PALETTE.yellow;
     ctx.lineWidth = 3;
     ctx.strokeRect(x + 4, y + 8, 122, 52);
-    if (!open) {
-      // Closed oven door: solid panel with a small window and handle.
-      ctx.fillStyle = "#3a2a1e";
-      ctx.fillRect(x + 8, y + 12, 114, 44);
-      ctx.fillStyle = "#241a12";
-      ctx.fillRect(x + 22, y + 20, 86, 24);
-      const flick = 0.5 + Math.abs(Math.sin(performance.now() / 90)) * 0.5;
-      ctx.fillStyle = `rgba(255,140,40,${flick * 0.6})`;
-      ctx.fillRect(x + 24, y + 22, 82, 20);
-      ctx.fillStyle = PALETTE.yellow;
-      ctx.fillRect(x + 100, y + 30, 14, 4);
+
+    if (!open && !animPhase) {
+      drawOvenDoor(x, y, 1);
       return;
     }
+
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(x + 4, y + 8, 122, 52);
+    ctx.clip();
+
     const flick = 0.5 + Math.abs(Math.sin(performance.now() / 90)) * 0.5;
     ctx.fillStyle = `rgba(255,140,40,${flick})`;
     ctx.fillRect(x + 10, y + 48, 110, 8);
-    drawSprite(ctx, x + 30, y + 18, 2.5, SPRITES.baguetteBare);
+
+    if (animPhase === "inserting") {
+      // Peel slides in from the front carrying the baguette, drops it at
+      // the back, then slides back out empty — a little first-person
+      // "loading the oven" beat before the bake timer starts.
+      const dropT = 0.5;
+      const backY = y + 18, frontY = y + 52;
+      if (animT < dropT) {
+        const k = animT / dropT;
+        drawPeel(x + 40, frontY + (backY - frontY) * k, true);
+      } else {
+        drawSprite(ctx, x + 30, y + 18, 2.5, SPRITES.baguetteBare);
+        const k = (animT - dropT) / (1 - dropT);
+        drawPeel(x + 40, backY + (frontY - backY) * k, false);
+      }
+    } else if (open) {
+      drawSprite(ctx, x + 30, y + 18, 2.5, SPRITES.baguetteBare);
+    }
+
+    if (animPhase === "opening") {
+      drawOvenDoor(x, y, clamp(1 - animT, 0, 1));
+    }
+
+    ctx.restore();
   }
   function drawBakeGauge(x, y) {
     const w = 190, h = 16;
