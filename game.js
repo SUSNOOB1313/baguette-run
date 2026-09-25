@@ -287,8 +287,18 @@
   // entirely up to how long (and how often) they pour.
   const TOP_BAGUETTE_X = 150, TOP_BAGUETTE_Y = 50;
   const BOTTLE_RACK_X = 14, BOTTLE_RACK_Y = 116, BOTTLE_W = 46, BOTTLE_H = 30, BOTTLE_GAP = 4;
+  const BOTTLE_TILT_HELD = -20, BOTTLE_TILT_POURING = -65;
   function bottleRackPos(i) {
     return { x: BOTTLE_RACK_X + i * (BOTTLE_W + BOTTLE_GAP), y: BOTTLE_RACK_Y };
+  }
+  // Where the bottle's cap actually ends up on screen once it's tipped —
+  // the cap sits dead center over the pivot before any rotation, so tilting
+  // swings it out to the side the bottle's tipped toward.
+  function bottleCapPos(x, y, tiltDeg) {
+    const pivotX = x + BOTTLE_W / 2, pivotY = y + BOTTLE_H;
+    const dy = 0.5 - BOTTLE_H; // cap's offset from the pivot before rotation
+    const rad = (tiltDeg * Math.PI) / 180;
+    return { x: pivotX - dy * Math.sin(rad), y: pivotY + dy * Math.cos(rad) };
   }
   // tiltDeg tips the bottle around its base, like it's being tipped over to
   // pour — 0 upright on the rack, a little when just picked up, a lot once
@@ -828,7 +838,8 @@
         }
         drawToppingParticles(bx, by, sc, this.toppingParticles);
         if (this.pouringId && this.pourOverBaguette) {
-          drawPourStream(this.pourPos.x, this.pourPos.y, TOPPINGS.find((t) => t.id === this.pouringId).color, this.wobble);
+          const cap = bottleCapPos(this.pourPos.x - BOTTLE_W / 2, this.pourPos.y - BOTTLE_H / 2, BOTTLE_TILT_POURING);
+          drawPourStream(cap.x, cap.y, TOPPINGS.find((t) => t.id === this.pouringId).color, this.wobble);
         }
       }
 
@@ -869,7 +880,7 @@
         });
         if (this.pouringId) {
           const t = TOPPINGS.find((tp) => tp.id === this.pouringId);
-          const tilt = this.pourOverBaguette ? -65 : -20;
+          const tilt = this.pourOverBaguette ? BOTTLE_TILT_POURING : BOTTLE_TILT_HELD;
           drawBottle(this.pourPos.x - BOTTLE_W / 2, this.pourPos.y - BOTTLE_H / 2, t, true, tilt);
         }
         const gridX = 14, tw = 84, gap = 4;
