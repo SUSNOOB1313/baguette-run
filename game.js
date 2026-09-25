@@ -297,37 +297,66 @@
   window.addEventListener("pointerup", () => { Shop.shapeDragIndex = -1; });
   window.addEventListener("pointercancel", () => { Shop.shapeDragIndex = -1; });
 
-  // Oven loading for the Shop's BAKE step: once the door is open, the player
-  // has to grab the peel handle and drag it in to push the baguette to the
-  // back of the oven — it doesn't slide in on its own.
+  // Oven interaction for the Shop's BAKE step, all drag-driven:
+  //  1. Grab the door handle and drag it DOWN to pull the oven open.
+  //  2. Grab the peel handle and drag it in to push the baguette to the back.
+  //  3. Once it's loaded (peel auto-retracts), grab the door handle again
+  //     and drag it back UP to close the oven and start the bake timer.
   const OVEN_X = 150, OVEN_Y = 50;
   const OVEN_HANDLE_GRAB_R = 34;
+  const OVEN_DOOR_CLOSED_Y = OVEN_Y + 16, OVEN_DOOR_OPEN_Y = OVEN_Y + 54;
   function ovenPeelPos() {
     const frontY = OVEN_Y + 52, backY = OVEN_Y + 18;
     return { x: OVEN_X + 40, y: frontY - (frontY - backY) * Shop.insertProgress };
   }
+  function ovenHandlePos() {
+    return { x: OVEN_X + 65, y: OVEN_DOOR_CLOSED_Y + (OVEN_DOOR_OPEN_Y - OVEN_DOOR_CLOSED_Y) * Shop.doorProgress };
+  }
   canvas.addEventListener("pointerdown", (e) => {
-    if (Game.scene !== "SHOP" || Shop.step !== "BAKE" || Shop.ovenAnimPhase !== "loading") return;
+    if (Game.scene !== "SHOP" || Shop.step !== "BAKE") return;
     const p = canvasPointFromEvent(e);
-    const handle = ovenPeelPos();
-    if (Math.hypot(p.x - handle.x, p.y - handle.y) <= OVEN_HANDLE_GRAB_R) Shop.ovenDragging = true;
-  });
-  window.addEventListener("pointermove", (e) => {
-    if (!Shop.ovenDragging) return;
-    if (Game.scene !== "SHOP" || Shop.step !== "BAKE" || Shop.ovenAnimPhase !== "loading") { Shop.ovenDragging = false; return; }
-    const p = canvasPointFromEvent(e);
-    const frontY = OVEN_Y + 52, backY = OVEN_Y + 18;
-    Shop.insertProgress = clamp((frontY - p.y) / (frontY - backY), 0, 1);
-    if (Shop.insertProgress >= 1) {
-      Shop.ovenDragging = false;
-      Shop.ovenAnimPhase = "retracting";
-      Shop.ovenAnimT = 0;
-      Shop.ovenAnimDur = 0.4;
-      Audio8.toggle();
+    if (Shop.bakeStage === "loading") {
+      const handle = ovenPeelPos();
+      if (Math.hypot(p.x - handle.x, p.y - handle.y) <= OVEN_HANDLE_GRAB_R) Shop.peelDragging = true;
+    } else if (Shop.bakeStage === "closed" || Shop.bakeStage === "opening" || Shop.bakeStage === "closing") {
+      const handle = ovenHandlePos();
+      if (Math.hypot(p.x - handle.x, p.y - handle.y) <= OVEN_HANDLE_GRAB_R) {
+        Shop.doorDragging = true;
+        if (Shop.bakeStage === "closed") Shop.bakeStage = "opening";
+      }
     }
   });
-  window.addEventListener("pointerup", () => { Shop.ovenDragging = false; });
-  window.addEventListener("pointercancel", () => { Shop.ovenDragging = false; });
+  window.addEventListener("pointermove", (e) => {
+    if (Shop.peelDragging) {
+      if (Game.scene !== "SHOP" || Shop.step !== "BAKE" || Shop.bakeStage !== "loading") { Shop.peelDragging = false; return; }
+      const p = canvasPointFromEvent(e);
+      const frontY = OVEN_Y + 52, backY = OVEN_Y + 18;
+      Shop.insertProgress = clamp((frontY - p.y) / (frontY - backY), 0, 1);
+      if (Shop.insertProgress >= 1) {
+        Shop.peelDragging = false;
+        Shop.bakeStage = "retracting";
+        Shop.ovenAnimT = 0;
+        Shop.ovenAnimDur = 0.4;
+        Audio8.toggle();
+      }
+    } else if (Shop.doorDragging) {
+      if (Game.scene !== "SHOP" || Shop.step !== "BAKE") { Shop.doorDragging = false; return; }
+      const p = canvasPointFromEvent(e);
+      Shop.doorProgress = clamp((p.y - OVEN_DOOR_CLOSED_Y) / (OVEN_DOOR_OPEN_Y - OVEN_DOOR_CLOSED_Y), 0, 1);
+      if (Shop.bakeStage === "opening" && Shop.doorProgress >= 1) {
+        Shop.doorDragging = false;
+        Shop.bakeStage = "loading";
+        Shop.insertProgress = 0;
+        Audio8.toggle();
+      } else if (Shop.bakeStage === "closing" && Shop.doorProgress <= 0) {
+        Shop.doorDragging = false;
+        Shop.bakeStage = "baking";
+        Audio8.toggle();
+      }
+    }
+  });
+  window.addEventListener("pointerup", () => { Shop.peelDragging = false; Shop.doorDragging = false; });
+  window.addEventListener("pointercancel", () => { Shop.peelDragging = false; Shop.doorDragging = false; });
 
   let buttons = []; // active clickable regions for current scene: {x,y,w,h,label,sub,onClick,disabled,style}
   function addButton(b) { buttons.push(b); return b; }
@@ -494,12 +523,14 @@
     bakeDir: 1,
     bakeSpeed: 1.7,
     bakeResult: null, // 'perfect' | 'good' | 'burnt' | 'raw'
-    ovenOpen: false,
-    ovenAnimPhase: null, // null | 'opening' | 'loading' | 'retracting'
+    // closed -> opening -> loading -> retracting -> closing -> baking
+    bakeStage: "closed",
+    doorProgress: 0, // 0 = door shut, 1 = door fully pulled open
+    doorDragging: false,
     ovenAnimT: 0,
     ovenAnimDur: 0,
     insertProgress: 0, // 0-1, how far the peel has been dragged into the oven
-    ovenDragging: false,
+    peelDragging: false,
     selectedToppings: [],
     wobble: 0,
     shapePoints: [],
@@ -514,12 +545,13 @@
       this.bakeDir = 1;
       this.bakeSpeed = 1.6 + Game.day * 0.15;
       this.bakeResult = null;
-      this.ovenOpen = false;
-      this.ovenAnimPhase = null;
+      this.bakeStage = "closed";
+      this.doorProgress = 0;
+      this.doorDragging = false;
       this.ovenAnimT = 0;
       this.ovenAnimDur = 0;
       this.insertProgress = 0;
-      this.ovenDragging = false;
+      this.peelDragging = false;
       this.selectedToppings = [];
       this.wobble = 0;
       this.shapeDragIndex = -1;
@@ -560,37 +592,25 @@
       this.wobble += dt;
       if (this.step === "SHAPE") this.updateShapeAccuracy();
       if (this.step === "BAKE") {
-        if (this.ovenAnimPhase === "opening" || this.ovenAnimPhase === "retracting") {
+        if (this.bakeStage === "retracting") {
+          // The only auto-advancing beat: the emptied peel slides itself
+          // back out once the baguette's been dropped at the back.
           this.ovenAnimT += dt / this.ovenAnimDur;
           if (this.ovenAnimT >= 1) {
-            if (this.ovenAnimPhase === "opening") {
-              // Door's open — now the player has to grab the peel handle
-              // and drag it in themselves; nothing auto-advances here.
-              this.ovenAnimPhase = "loading";
-              this.ovenAnimT = 0;
-              this.insertProgress = 0;
-            } else {
-              this.ovenAnimPhase = null;
-              this.ovenAnimT = 0;
-              this.ovenOpen = true;
-            }
+            this.bakeStage = "closing";
+            this.ovenAnimT = 0;
           }
-        } else if (this.ovenOpen) {
+        } else if (this.bakeStage === "baking") {
           this.bakeNeedle += this.bakeDir * this.bakeSpeed * dt;
           if (this.bakeNeedle > 1) { this.bakeNeedle = 1; this.bakeDir = -1; }
           if (this.bakeNeedle < 0) { this.bakeNeedle = 0; this.bakeDir = 1; }
         }
+        // 'closed', 'opening', 'loading' and 'closing' are all driven by the
+        // player dragging a handle, not by time.
       }
     },
-    openOven() {
-      if (this.step !== "BAKE" || this.ovenOpen || this.ovenAnimPhase) return;
-      this.ovenAnimPhase = "opening";
-      this.ovenAnimT = 0;
-      this.ovenAnimDur = 0.4;
-      Audio8.toggle();
-    },
     pullFromOven() {
-      if (this.step !== "BAKE" || !this.ovenOpen) return;
+      if (this.step !== "BAKE" || this.bakeStage !== "baking") return;
       const n = this.bakeNeedle;
       // Perfect zone centered ~0.62 (golden brown), width tuned by day (harder = narrower)
       const center = 0.62;
@@ -675,7 +695,7 @@
         drawPanelText("ACCURACY " + this.shapeAccuracy + "%", 150, 120, 6,
           this.shapeAccuracy >= 55 ? PALETTE.green : this.shapeAccuracy >= 35 ? PALETTE.yellow : PALETTE.red);
       } else if (this.step === "BAKE") {
-        drawOvenScene(wx, wy, this.ovenOpen, this.ovenAnimPhase, this.ovenAnimT, this.insertProgress);
+        drawOvenScene(wx, wy, this.bakeStage, this.doorProgress, this.ovenAnimT, this.insertProgress);
       } else {
         const sc = 3;
         const size = spriteSize(SPRITES.baguetteBare, sc);
@@ -703,15 +723,16 @@
         });
       } else if (this.step === "BAKE") {
         drawBakeGauge(150, 130);
-        if (this.ovenAnimPhase === "opening") {
-          drawPanelText("OPENING OVEN...", 150, 116, 6, PALETTE.yellow);
-        } else if (this.ovenAnimPhase === "loading") {
-          drawPanelText("DRAG THE HANDLE IN!", 150, 116, 6, PALETTE.yellow);
-        } else if (this.ovenAnimPhase === "retracting") {
+        if (this.bakeStage === "closed") {
+          drawPanelText("DRAG THE HANDLE DOWN", 150, 116, 6, PALETTE.yellow);
+        } else if (this.bakeStage === "opening") {
+          drawPanelText("PULLING OPEN...", 150, 116, 6, PALETTE.yellow);
+        } else if (this.bakeStage === "loading") {
+          drawPanelText("DRAG THE PEEL IN!", 150, 116, 6, PALETTE.yellow);
+        } else if (this.bakeStage === "retracting") {
           drawPanelText("LOADED!", 150, 116, 6, PALETTE.yellow);
-        } else if (!this.ovenOpen) {
-          drawPanelText("PRESS O TO OPEN OVEN", 150, 116, 6, PALETTE.yellow);
-          addButton({ x: 260, y: 60, w: 110, h: 34, label: "OPEN OVEN", sub: "(O)", onClick: () => this.openOven() });
+        } else if (this.bakeStage === "closing") {
+          drawPanelText("DRAG THE HANDLE UP", 150, 116, 6, PALETTE.yellow);
         } else {
           drawPanelText("PRESS B TO BAKE!", 150, 116, 6, PALETTE.yellow);
           addButton({ x: 260, y: 60, w: 110, h: 34, label: "BAKE IT!", sub: "(B)", onClick: () => this.pullFromOven() });
@@ -791,7 +812,7 @@
     ctx.strokeRect(x, y, w, h);
   }
   function drawOvenDoor(x, y, frac) {
-    // Closed oven door: solid panel with a small window and handle.
+    // Closed oven door: solid panel with a glowing window.
     // frac: 1 = fully closed, shrinks toward 0 as the door lifts open.
     if (frac <= 0.02) return;
     const doorH = 44 * frac;
@@ -804,10 +825,13 @@
       ctx.fillStyle = `rgba(255,140,40,${flick * 0.6})`;
       ctx.fillRect(x + 24, y + 22, 82, Math.min(20, doorH - 10));
     }
-    if (frac > 0.85) {
-      ctx.fillStyle = PALETTE.yellow;
-      ctx.fillRect(x + 100, y + 30, 14, 4);
-    }
+  }
+  function drawOvenHandle(hx, hy, grabbable) {
+    ctx.fillStyle = grabbable ? PALETTE.yellow : "#c9a227";
+    ctx.fillRect(hx - 10, hy - 3, 20, 6);
+    ctx.strokeStyle = PALETTE.ink;
+    ctx.lineWidth = 1;
+    ctx.strokeRect(hx - 10, hy - 3, 20, 6);
   }
   function drawPeel(px, py, carrying, highlight) {
     // A first-person peel (paddle) reaching in from the viewer's side to
@@ -823,47 +847,51 @@
       drawSprite(ctx, px - 18, py - 14, 2, SPRITES.baguetteBare);
     }
   }
-  function drawOvenScene(x, y, open, animPhase, animT, insertProgress) {
+  function drawOvenScene(x, y, bakeStage, doorProgress, animT, insertProgress) {
     ctx.fillStyle = "#1a1210";
     ctx.fillRect(x, y + 4, 130, 60);
     ctx.strokeStyle = PALETTE.yellow;
     ctx.lineWidth = 3;
     ctx.strokeRect(x + 4, y + 8, 122, 52);
 
-    if (!open && !animPhase) {
-      drawOvenDoor(x, y, 1);
-      return;
-    }
-
     ctx.save();
     ctx.beginPath();
     ctx.rect(x + 4, y + 8, 122, 52);
     ctx.clip();
 
-    const flick = 0.5 + Math.abs(Math.sin(performance.now() / 90)) * 0.5;
-    ctx.fillStyle = `rgba(255,140,40,${flick})`;
-    ctx.fillRect(x + 10, y + 48, 110, 8);
+    // The interior (flame + whatever's inside) only shows once the door has
+    // lifted enough to see past it.
+    if (doorProgress > 0.05) {
+      const flick = 0.5 + Math.abs(Math.sin(performance.now() / 90)) * 0.5;
+      ctx.fillStyle = `rgba(255,140,40,${flick})`;
+      ctx.fillRect(x + 10, y + 48, 110, 8);
 
-    const backY = y + 18, frontY = y + 52;
-    if (animPhase === "loading") {
-      // Waiting on the player to click-and-drag the peel handle to push
-      // the baguette in — the peel only moves as far as they've dragged it.
-      const py = frontY - (frontY - backY) * insertProgress;
-      drawPeel(x + 40, py, true, true);
-    } else if (animPhase === "retracting") {
-      // Baguette dropped at the back; the empty peel slides back out on its own.
-      drawSprite(ctx, x + 30, y + 18, 2.5, SPRITES.baguetteBare);
-      const py = backY + (frontY - backY) * animT;
-      drawPeel(x + 40, py, false, false);
-    } else if (open) {
-      drawSprite(ctx, x + 30, y + 18, 2.5, SPRITES.baguetteBare);
+      const backY = y + 18, frontY = y + 52;
+      if (bakeStage === "loading") {
+        // Waiting on the player to drag the peel handle in to push the
+        // baguette to the back — it only moves as far as they've dragged it.
+        const py = frontY - (frontY - backY) * insertProgress;
+        drawPeel(x + 40, py, true, true);
+      } else if (bakeStage === "retracting") {
+        // Baguette dropped at the back; the empty peel slides back out on its own.
+        drawSprite(ctx, x + 30, y + 18, 2.5, SPRITES.baguetteBare);
+        const py = backY + (frontY - backY) * animT;
+        drawPeel(x + 40, py, false, false);
+      } else if (bakeStage === "closing") {
+        drawSprite(ctx, x + 30, y + 18, 2.5, SPRITES.baguetteBare);
+      }
     }
 
-    if (animPhase === "opening") {
-      drawOvenDoor(x, y, clamp(1 - animT, 0, 1));
-    }
+    drawOvenDoor(x, y, 1 - doorProgress);
 
     ctx.restore();
+
+    // The door handle, grabbed to pull the door open or push it shut —
+    // drawn outside the clip since it hangs below the door's frame.
+    if (bakeStage === "closed" || bakeStage === "opening" || bakeStage === "closing") {
+      const closedY = y + 16, openY = y + 54;
+      drawOvenHandle(x + 65, closedY + (openY - closedY) * doorProgress, true);
+    }
   }
   function drawBakeGauge(x, y) {
     const w = 190, h = 16;
@@ -1354,7 +1382,6 @@
     if (e.code === "Enter" && Game.scene === "TITLE") { Audio8.start(); resetGame(); }
     if (e.code === "Enter" && Game.scene === "GAMEOVER") { Audio8.start(); resetGame(); }
     if (Game.scene === "SHOP" && Shop.step === "BAKE") {
-      if (e.code === "KeyO") Shop.openOven();
       if (e.code === "KeyB") Shop.pullFromOven();
     }
   });

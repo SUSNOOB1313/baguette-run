@@ -13,10 +13,12 @@ No build step, no dependencies — just open `index.html` in a browser
 **Shop phase**
 1. Read the order card (customer + requested toppings).
 2. Click through **Knead Dough** → **Shape Loaf**.
-3. Press **O** to open the oven, then click the peel's handle and
-   drag it in to push the baguette to the back of the oven. Once
-   loaded, watch the bake gauge and press **B** to bake when the
-   needle is in the golden zone — too early is raw, too late is burnt.
+3. Drag the oven's door handle **down** to pull it open, then click
+   the peel's handle and drag it in to push the baguette to the back
+   of the oven. Once it's loaded, drag the door handle back **up** to
+   close the oven, then watch the bake gauge and press **B** to bake
+   when the needle is in the golden zone — too early is raw, too late
+   is burnt.
 4. Toggle the toppings that match the order, then **Wrap & Go**.
 
 **Delivery phase — first-person street ride**
