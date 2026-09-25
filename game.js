@@ -297,6 +297,38 @@
   window.addEventListener("pointerup", () => { Shop.shapeDragIndex = -1; });
   window.addEventListener("pointercancel", () => { Shop.shapeDragIndex = -1; });
 
+  // Oven loading for the Shop's BAKE step: once the door is open, the player
+  // has to grab the peel handle and drag it in to push the baguette to the
+  // back of the oven — it doesn't slide in on its own.
+  const OVEN_X = 150, OVEN_Y = 50;
+  const OVEN_HANDLE_GRAB_R = 34;
+  function ovenPeelPos() {
+    const frontY = OVEN_Y + 52, backY = OVEN_Y + 18;
+    return { x: OVEN_X + 40, y: frontY - (frontY - backY) * Shop.insertProgress };
+  }
+  canvas.addEventListener("pointerdown", (e) => {
+    if (Game.scene !== "SHOP" || Shop.step !== "BAKE" || Shop.ovenAnimPhase !== "loading") return;
+    const p = canvasPointFromEvent(e);
+    const handle = ovenPeelPos();
+    if (Math.hypot(p.x - handle.x, p.y - handle.y) <= OVEN_HANDLE_GRAB_R) Shop.ovenDragging = true;
+  });
+  window.addEventListener("pointermove", (e) => {
+    if (!Shop.ovenDragging) return;
+    if (Game.scene !== "SHOP" || Shop.step !== "BAKE" || Shop.ovenAnimPhase !== "loading") { Shop.ovenDragging = false; return; }
+    const p = canvasPointFromEvent(e);
+    const frontY = OVEN_Y + 52, backY = OVEN_Y + 18;
+    Shop.insertProgress = clamp((frontY - p.y) / (frontY - backY), 0, 1);
+    if (Shop.insertProgress >= 1) {
+      Shop.ovenDragging = false;
+      Shop.ovenAnimPhase = "retracting";
+      Shop.ovenAnimT = 0;
+      Shop.ovenAnimDur = 0.4;
+      Audio8.toggle();
+    }
+  });
+  window.addEventListener("pointerup", () => { Shop.ovenDragging = false; });
+  window.addEventListener("pointercancel", () => { Shop.ovenDragging = false; });
+
   let buttons = []; // active clickable regions for current scene: {x,y,w,h,label,sub,onClick,disabled,style}
   function addButton(b) { buttons.push(b); return b; }
 
@@ -463,9 +495,11 @@
     bakeSpeed: 1.7,
     bakeResult: null, // 'perfect' | 'good' | 'burnt' | 'raw'
     ovenOpen: false,
-    ovenAnimPhase: null, // null | 'opening' | 'inserting'
+    ovenAnimPhase: null, // null | 'opening' | 'loading' | 'retracting'
     ovenAnimT: 0,
     ovenAnimDur: 0,
+    insertProgress: 0, // 0-1, how far the peel has been dragged into the oven
+    ovenDragging: false,
     selectedToppings: [],
     wobble: 0,
     shapePoints: [],
@@ -484,6 +518,8 @@
       this.ovenAnimPhase = null;
       this.ovenAnimT = 0;
       this.ovenAnimDur = 0;
+      this.insertProgress = 0;
+      this.ovenDragging = false;
       this.selectedToppings = [];
       this.wobble = 0;
       this.shapeDragIndex = -1;
@@ -524,13 +560,15 @@
       this.wobble += dt;
       if (this.step === "SHAPE") this.updateShapeAccuracy();
       if (this.step === "BAKE") {
-        if (this.ovenAnimPhase) {
+        if (this.ovenAnimPhase === "opening" || this.ovenAnimPhase === "retracting") {
           this.ovenAnimT += dt / this.ovenAnimDur;
           if (this.ovenAnimT >= 1) {
             if (this.ovenAnimPhase === "opening") {
-              this.ovenAnimPhase = "inserting";
+              // Door's open — now the player has to grab the peel handle
+              // and drag it in themselves; nothing auto-advances here.
+              this.ovenAnimPhase = "loading";
               this.ovenAnimT = 0;
-              this.ovenAnimDur = 0.8;
+              this.insertProgress = 0;
             } else {
               this.ovenAnimPhase = null;
               this.ovenAnimT = 0;
@@ -637,7 +675,7 @@
         drawPanelText("ACCURACY " + this.shapeAccuracy + "%", 150, 120, 6,
           this.shapeAccuracy >= 55 ? PALETTE.green : this.shapeAccuracy >= 35 ? PALETTE.yellow : PALETTE.red);
       } else if (this.step === "BAKE") {
-        drawOvenScene(wx, wy, this.ovenOpen, this.ovenAnimPhase, this.ovenAnimT);
+        drawOvenScene(wx, wy, this.ovenOpen, this.ovenAnimPhase, this.ovenAnimT, this.insertProgress);
       } else {
         const sc = 3;
         const size = spriteSize(SPRITES.baguetteBare, sc);
@@ -665,8 +703,12 @@
         });
       } else if (this.step === "BAKE") {
         drawBakeGauge(150, 130);
-        if (this.ovenAnimPhase) {
-          drawPanelText(this.ovenAnimPhase === "opening" ? "OPENING OVEN..." : "LOADING BAGUETTE...", 150, 116, 6, PALETTE.yellow);
+        if (this.ovenAnimPhase === "opening") {
+          drawPanelText("OPENING OVEN...", 150, 116, 6, PALETTE.yellow);
+        } else if (this.ovenAnimPhase === "loading") {
+          drawPanelText("DRAG THE HANDLE IN!", 150, 116, 6, PALETTE.yellow);
+        } else if (this.ovenAnimPhase === "retracting") {
+          drawPanelText("LOADED!", 150, 116, 6, PALETTE.yellow);
         } else if (!this.ovenOpen) {
           drawPanelText("PRESS O TO OPEN OVEN", 150, 116, 6, PALETTE.yellow);
           addButton({ x: 260, y: 60, w: 110, h: 34, label: "OPEN OVEN", sub: "(O)", onClick: () => this.openOven() });
@@ -767,10 +809,10 @@
       ctx.fillRect(x + 100, y + 30, 14, 4);
     }
   }
-  function drawPeel(px, py, carrying) {
+  function drawPeel(px, py, carrying, highlight) {
     // A first-person peel (paddle) reaching in from the viewer's side to
     // place the baguette, its handle trailing off toward the bottom edge.
-    ctx.fillStyle = "#8a5222";
+    ctx.fillStyle = highlight ? PALETTE.yellow : "#8a5222";
     ctx.fillRect(px - 3, py + 6, 6, 40);
     ctx.fillStyle = "#c98a4b";
     ctx.fillRect(px - 24, py - 4, 48, 8);
@@ -781,7 +823,7 @@
       drawSprite(ctx, px - 18, py - 14, 2, SPRITES.baguetteBare);
     }
   }
-  function drawOvenScene(x, y, open, animPhase, animT) {
+  function drawOvenScene(x, y, open, animPhase, animT, insertProgress) {
     ctx.fillStyle = "#1a1210";
     ctx.fillRect(x, y + 4, 130, 60);
     ctx.strokeStyle = PALETTE.yellow;
@@ -802,20 +844,17 @@
     ctx.fillStyle = `rgba(255,140,40,${flick})`;
     ctx.fillRect(x + 10, y + 48, 110, 8);
 
-    if (animPhase === "inserting") {
-      // Peel slides in from the front carrying the baguette, drops it at
-      // the back, then slides back out empty — a little first-person
-      // "loading the oven" beat before the bake timer starts.
-      const dropT = 0.5;
-      const backY = y + 18, frontY = y + 52;
-      if (animT < dropT) {
-        const k = animT / dropT;
-        drawPeel(x + 40, frontY + (backY - frontY) * k, true);
-      } else {
-        drawSprite(ctx, x + 30, y + 18, 2.5, SPRITES.baguetteBare);
-        const k = (animT - dropT) / (1 - dropT);
-        drawPeel(x + 40, backY + (frontY - backY) * k, false);
-      }
+    const backY = y + 18, frontY = y + 52;
+    if (animPhase === "loading") {
+      // Waiting on the player to click-and-drag the peel handle to push
+      // the baguette in — the peel only moves as far as they've dragged it.
+      const py = frontY - (frontY - backY) * insertProgress;
+      drawPeel(x + 40, py, true, true);
+    } else if (animPhase === "retracting") {
+      // Baguette dropped at the back; the empty peel slides back out on its own.
+      drawSprite(ctx, x + 30, y + 18, 2.5, SPRITES.baguetteBare);
+      const py = backY + (frontY - backY) * animT;
+      drawPeel(x + 40, py, false, false);
     } else if (open) {
       drawSprite(ctx, x + 30, y + 18, 2.5, SPRITES.baguetteBare);
     }
