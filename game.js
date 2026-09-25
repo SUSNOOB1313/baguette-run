@@ -273,11 +273,17 @@
       });
     });
   }
-  function drawPourStream(x, y, color, wobble) {
+  function drawPourStream(x, y, color, wobble, drops, splat) {
     ctx.fillStyle = color;
-    for (let i = 0; i < 4; i++) {
-      const sy = y + 8 + i * 6 + Math.sin(wobble * 10 + i) * 2;
-      ctx.fillRect(x - 1, sy, 2, 4);
+    let sy = y + 8;
+    for (let i = 0; i < drops; i++) {
+      sy += 6;
+      ctx.fillRect(x - 1 + Math.sin(wobble * 10 + i) * 2, sy, 2, 4);
+    }
+    if (splat) {
+      ctx.beginPath();
+      ctx.ellipse(x, sy + 5, 6, 2.5, 0, 0, Math.PI * 2);
+      ctx.fill();
     }
   }
 
@@ -456,15 +462,27 @@
   });
   window.addEventListener("pointermove", (e) => {
     if (!Shop.pouringId) return;
-    if (Game.scene !== "SHOP" || Shop.step !== "TOP") { Shop.pouringId = null; Shop.pourOverBaguette = false; return; }
+    if (Game.scene !== "SHOP" || Shop.step !== "TOP") {
+      Shop.pouringId = null; Shop.pourTilted = false; Shop.pourOverBaguette = false; return;
+    }
     const p = canvasPointFromEvent(e);
     Shop.pourPos = p;
-    const bx = TOP_BAGUETTE_X + 10, by = TOP_BAGUETTE_Y + 20;
-    const sz = spriteSize(SPRITES.baguetteBare, 3);
-    Shop.pourOverBaguette = p.x >= bx - 6 && p.x <= bx + sz.w + 6 && p.y >= by - 10 && p.y <= by + sz.h + 10;
+    // Lift the bottle up off the rack and it tips over ready to pour — but
+    // tipped-over only means it's spilling. Whether anything actually lands
+    // on the baguette depends on where the CAP ends up once tilted, not on
+    // the raw mouse position (they're offset once the bottle leans over).
+    Shop.pourTilted = p.y < BOTTLE_RACK_Y - 4;
+    if (Shop.pourTilted) {
+      const cap = bottleCapPos(p.x - BOTTLE_W / 2, p.y - BOTTLE_H / 2, BOTTLE_TILT_POURING);
+      const bx = TOP_BAGUETTE_X + 10, by = TOP_BAGUETTE_Y + 20;
+      const sz = spriteSize(SPRITES.baguetteBare, 3);
+      Shop.pourOverBaguette = cap.x >= bx - 4 && cap.x <= bx + sz.w + 4 && cap.y >= by - 4 && cap.y <= by + sz.h + 6;
+    } else {
+      Shop.pourOverBaguette = false;
+    }
   });
-  window.addEventListener("pointerup", () => { Shop.pouringId = null; Shop.pourOverBaguette = false; });
-  window.addEventListener("pointercancel", () => { Shop.pouringId = null; Shop.pourOverBaguette = false; });
+  window.addEventListener("pointerup", () => { Shop.pouringId = null; Shop.pourTilted = false; Shop.pourOverBaguette = false; });
+  window.addEventListener("pointercancel", () => { Shop.pouringId = null; Shop.pourTilted = false; Shop.pourOverBaguette = false; });
 
   let buttons = []; // active clickable regions for current scene: {x,y,w,h,label,sub,onClick,disabled,style}
   function addButton(b) { buttons.push(b); return b; }
@@ -642,7 +660,8 @@
     toppingParticles: {}, // id -> array of {fx,fy,fs} sprinkles poured so far
     pouringId: null, // id of the topping bottle currently picked up, or null
     pourPos: { x: 0, y: 0 },
-    pourOverBaguette: false,
+    pourTilted: false, // lifted up off the rack, tipped over ready to pour
+    pourOverBaguette: false, // AND actually lined up with the baguette
     wobble: 0,
     shapePoints: [],
     shapeTargets: [],
@@ -666,6 +685,7 @@
       this.toppingParticles = {};
       this.pouringId = null;
       this.pourPos = { x: 0, y: 0 };
+      this.pourTilted = false;
       this.pourOverBaguette = false;
       this.wobble = 0;
       this.shapeDragIndex = -1;
@@ -837,9 +857,13 @@
           ctx.fillRect(bx, by, size.w, size.h);
         }
         drawToppingParticles(bx, by, sc, this.toppingParticles);
-        if (this.pouringId && this.pourOverBaguette) {
+        if (this.pouringId && this.pourTilted) {
           const cap = bottleCapPos(this.pourPos.x - BOTTLE_W / 2, this.pourPos.y - BOTTLE_H / 2, BOTTLE_TILT_POURING);
-          drawPourStream(cap.x, cap.y, TOPPINGS.find((t) => t.id === this.pouringId).color, this.wobble);
+          const color = TOPPINGS.find((t) => t.id === this.pouringId).color;
+          // Lined up with the baguette: a short stream actually lands on it.
+          // Off to the side: a longer stream misses and spills on the counter.
+          if (this.pourOverBaguette) drawPourStream(cap.x, cap.y, color, this.wobble, 2, false);
+          else drawPourStream(cap.x, cap.y, color, this.wobble, 6, true);
         }
       }
 
@@ -870,7 +894,10 @@
         }
       } else if (this.step === "TOP") {
         drawPanelText("Result: " + this.bakeResult.toUpperCase(), 150, 96, 6, this.bakeResult === "perfect" ? PALETTE.green : (this.bakeResult === "good" ? PALETTE.yellow : PALETTE.red));
-        drawPanelText("PICK UP A BOTTLE & POUR IT ON:", 14, 108, 5.5, PALETTE.white);
+        drawPanelText(
+          this.pouringId && this.pourTilted && !this.pourOverBaguette ? "MISSING THE BAGUETTE!" : "PICK UP A BOTTLE & POUR IT ON:",
+          14, 108, 5.5, this.pouringId && this.pourTilted && !this.pourOverBaguette ? PALETTE.red : PALETTE.white
+        );
         TOPPINGS.forEach((t, i) => {
           const r = bottleRackPos(i);
           drawPanelText(t.label, r.x + BOTTLE_W / 2, r.y + BOTTLE_H + 2, 4.5, PALETTE.white, "center");
@@ -880,7 +907,7 @@
         });
         if (this.pouringId) {
           const t = TOPPINGS.find((tp) => tp.id === this.pouringId);
-          const tilt = this.pourOverBaguette ? BOTTLE_TILT_POURING : BOTTLE_TILT_HELD;
+          const tilt = this.pourTilted ? BOTTLE_TILT_POURING : BOTTLE_TILT_HELD;
           drawBottle(this.pourPos.x - BOTTLE_W / 2, this.pourPos.y - BOTTLE_H / 2, t, true, tilt);
         }
         const gridX = 14, tw = 84, gap = 4;
