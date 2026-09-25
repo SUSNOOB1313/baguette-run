@@ -277,24 +277,35 @@
   // pour — holding it there adds more, letting go stops, so coverage is
   // entirely up to how long (and how often) they pour.
   const TOP_BAGUETTE_X = 150, TOP_BAGUETTE_Y = 50;
-  const BOTTLE_RACK_X = 14, BOTTLE_RACK_Y = 120, BOTTLE_W = 46, BOTTLE_H = 34, BOTTLE_GAP = 4;
+  const BOTTLE_RACK_X = 14, BOTTLE_RACK_Y = 116, BOTTLE_W = 46, BOTTLE_H = 30, BOTTLE_GAP = 4;
   function bottleRackPos(i) {
     return { x: BOTTLE_RACK_X + i * (BOTTLE_W + BOTTLE_GAP), y: BOTTLE_RACK_Y };
   }
-  function drawBottle(x, y, t, used, held) {
+  // tiltDeg tips the bottle around its base, like it's being tipped over to
+  // pour — 0 upright on the rack, a little when just picked up, a lot once
+  // it's actually held over the baguette and pouring.
+  function drawBottle(x, y, t, used, tiltDeg) {
+    ctx.save();
+    if (tiltDeg) {
+      const pivotX = x + BOTTLE_W / 2, pivotY = y + BOTTLE_H;
+      ctx.translate(pivotX, pivotY);
+      ctx.rotate((tiltDeg * Math.PI) / 180);
+      ctx.translate(-pivotX, -pivotY);
+    }
     const w = BOTTLE_W - 6, h = BOTTLE_H - 4;
     const bx = x + 3, by = y + 2;
     ctx.fillStyle = "#c9c9c9";
     ctx.fillRect(bx + w / 2 - 4, by, 8, 8);
     ctx.fillStyle = t.color;
     ctx.fillRect(bx + w / 2 - 5, by - 4, 10, 5);
-    ctx.fillStyle = held ? "rgba(255,255,255,0.4)" : "rgba(255,255,255,0.2)";
+    ctx.fillStyle = tiltDeg ? "rgba(255,255,255,0.4)" : "rgba(255,255,255,0.2)";
     ctx.fillRect(bx, by + 8, w, h - 8);
     ctx.fillStyle = t.color;
     ctx.fillRect(bx + 2, by + 12, w - 4, h - 14);
     ctx.strokeStyle = used ? PALETTE.yellow : PALETTE.ink;
     ctx.lineWidth = used ? 2 : 1;
     ctx.strokeRect(bx, by + 8, w, h - 8);
+    ctx.restore();
   }
 
   // ---------------------------------------------------------
@@ -713,14 +724,16 @@
     },
     pourTopping(id, dt) {
       // Free-form pouring: each tick while the bottle's held over the
-      // baguette adds a few more sprinkles, up to a cap — no toggle, no
-      // fixed amount, just however much the player holds it there for.
-      const MAX_PARTICLES = 40;
+      // baguette adds more sprinkles — no toggle, no fixed amount, and no
+      // gameplay cap, so holding it there long enough genuinely buries the
+      // baguette. SAFETY_CEILING only guards against unbounded memory growth
+      // if a bottle is somehow left pouring for a very long time.
+      const SAFETY_CEILING = 20000;
       const POUR_RATE = 26; // particles per second
       if (!this.toppingParticles[id]) this.toppingParticles[id] = [];
       const arr = this.toppingParticles[id];
-      if (arr.length >= MAX_PARTICLES) return;
-      const toAdd = Math.min(MAX_PARTICLES - arr.length, Math.max(1, Math.round(POUR_RATE * dt)));
+      if (arr.length >= SAFETY_CEILING) return;
+      const toAdd = Math.min(SAFETY_CEILING - arr.length, Math.max(1, Math.round(POUR_RATE * dt)));
       for (let i = 0; i < toAdd; i++) {
         arr.push({ fx: rand(0, 1), fy: rand(0, 1), fs: rand(0, 1) });
       }
@@ -839,14 +852,16 @@
         drawPanelText("Result: " + this.bakeResult.toUpperCase(), 150, 96, 6, this.bakeResult === "perfect" ? PALETTE.green : (this.bakeResult === "good" ? PALETTE.yellow : PALETTE.red));
         drawPanelText("PICK UP A BOTTLE & POUR IT ON:", 14, 108, 5.5, PALETTE.white);
         TOPPINGS.forEach((t, i) => {
-          if (this.pouringId === t.id) return; // drawn held, at the pointer, below
           const r = bottleRackPos(i);
+          drawPanelText(t.label, r.x + BOTTLE_W / 2, r.y + BOTTLE_H + 2, 4.5, PALETTE.white, "center");
+          if (this.pouringId === t.id) return; // drawn held, at the pointer, below
           const used = (this.toppingParticles[t.id] || []).length > 0;
-          drawBottle(r.x, r.y, t, used, false);
+          drawBottle(r.x, r.y, t, used, 0);
         });
         if (this.pouringId) {
           const t = TOPPINGS.find((tp) => tp.id === this.pouringId);
-          drawBottle(this.pourPos.x - BOTTLE_W / 2, this.pourPos.y - BOTTLE_H / 2, t, true, true);
+          const tilt = this.pourOverBaguette ? -65 : -20;
+          drawBottle(this.pourPos.x - BOTTLE_W / 2, this.pourPos.y - BOTTLE_H / 2, t, true, tilt);
         }
         const gridX = 14, tw = 84, gap = 4;
         addButton({ x: gridX, y: 168, w: 4 * tw + 3 * gap, h: 22, label: "WRAP & GO", font:"6px", onClick: () => {
