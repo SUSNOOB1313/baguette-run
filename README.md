@@ -19,7 +19,9 @@ No build step, no dependencies — just open `index.html` in a browser
    close the oven, then watch the bake gauge and press **B** to bake
    when the needle is in the golden zone — too early is raw, too late
    is burnt.
-4. Toggle the toppings that match the order, then **Wrap & Go**.
+4. Pick up a topping bottle and drag it over the baguette to pour —
+   hold it there as long as you like for a heavier coating, or just
+   dab it for a light one. Match the order, then **Wrap & Go**.
 
 **Delivery phase — first-person street ride**
 - The road scrolls toward you pseudo-3D, Outrun/Traffic-Rider style,

@@ -246,6 +246,56 @@
       }
     });
   }
+  function drawToppingParticles(x, y, scale, particlesById) {
+    // Renders whatever's actually been poured so far — persistent sprinkle
+    // positions (not regenerated each frame) so pouring visibly accumulates
+    // instead of jittering.
+    Object.keys(particlesById).forEach((id) => {
+      const arr = particlesById[id];
+      if (!arr || !arr.length) return;
+      const t = TOPPINGS.find((tp) => tp.id === id);
+      if (!t) return;
+      ctx.fillStyle = t.color;
+      arr.forEach((p) => {
+        const px = x + (1 + p.fx * 15) * scale;
+        const py = y + (2 + p.fy * 3) * scale;
+        const s = t.icon === "melt" ? scale * 1.4 : scale * (0.6 + p.fs * 0.5);
+        ctx.fillRect(px, py, s, s);
+      });
+    });
+  }
+  function drawPourStream(x, y, color, wobble) {
+    ctx.fillStyle = color;
+    for (let i = 0; i < 4; i++) {
+      const sy = y + 8 + i * 6 + Math.sin(wobble * 10 + i) * 2;
+      ctx.fillRect(x - 1, sy, 2, 4);
+    }
+  }
+
+  // Topping bottles for the Shop's TOP step: instead of toggling a topping
+  // on/off, the player picks up a bottle and drags it over the baguette to
+  // pour — holding it there adds more, letting go stops, so coverage is
+  // entirely up to how long (and how often) they pour.
+  const TOP_BAGUETTE_X = 150, TOP_BAGUETTE_Y = 50;
+  const BOTTLE_RACK_X = 14, BOTTLE_RACK_Y = 120, BOTTLE_W = 46, BOTTLE_H = 34, BOTTLE_GAP = 4;
+  function bottleRackPos(i) {
+    return { x: BOTTLE_RACK_X + i * (BOTTLE_W + BOTTLE_GAP), y: BOTTLE_RACK_Y };
+  }
+  function drawBottle(x, y, t, used, held) {
+    const w = BOTTLE_W - 6, h = BOTTLE_H - 4;
+    const bx = x + 3, by = y + 2;
+    ctx.fillStyle = "#c9c9c9";
+    ctx.fillRect(bx + w / 2 - 4, by, 8, 8);
+    ctx.fillStyle = t.color;
+    ctx.fillRect(bx + w / 2 - 5, by - 4, 10, 5);
+    ctx.fillStyle = held ? "rgba(255,255,255,0.4)" : "rgba(255,255,255,0.2)";
+    ctx.fillRect(bx, by + 8, w, h - 8);
+    ctx.fillStyle = t.color;
+    ctx.fillRect(bx + 2, by + 12, w - 4, h - 14);
+    ctx.strokeStyle = used ? PALETTE.yellow : PALETTE.ink;
+    ctx.lineWidth = used ? 2 : 1;
+    ctx.strokeRect(bx, by + 8, w, h - 8);
+  }
 
   // ---------------------------------------------------------
   // Input
@@ -357,6 +407,34 @@
   });
   window.addEventListener("pointerup", () => { Shop.peelDragging = false; Shop.doorDragging = false; });
   window.addEventListener("pointercancel", () => { Shop.peelDragging = false; Shop.doorDragging = false; });
+
+  // Topping bottles for the Shop's TOP step: pick one up off the rack and
+  // drag it over the baguette to pour — coverage builds up for as long as
+  // it's held there, however much or little the player wants.
+  canvas.addEventListener("pointerdown", (e) => {
+    if (Game.scene !== "SHOP" || Shop.step !== "TOP" || Shop.pouringId) return;
+    const p = canvasPointFromEvent(e);
+    for (let i = 0; i < TOPPINGS.length; i++) {
+      const r = bottleRackPos(i);
+      if (p.x >= r.x && p.x <= r.x + BOTTLE_W && p.y >= r.y && p.y <= r.y + BOTTLE_H) {
+        Shop.pouringId = TOPPINGS[i].id;
+        Shop.pourPos = { x: p.x, y: p.y };
+        Audio8.toggle();
+        break;
+      }
+    }
+  });
+  window.addEventListener("pointermove", (e) => {
+    if (!Shop.pouringId) return;
+    if (Game.scene !== "SHOP" || Shop.step !== "TOP") { Shop.pouringId = null; Shop.pourOverBaguette = false; return; }
+    const p = canvasPointFromEvent(e);
+    Shop.pourPos = p;
+    const bx = TOP_BAGUETTE_X + 10, by = TOP_BAGUETTE_Y + 20;
+    const sz = spriteSize(SPRITES.baguetteBare, 3);
+    Shop.pourOverBaguette = p.x >= bx - 6 && p.x <= bx + sz.w + 6 && p.y >= by - 10 && p.y <= by + sz.h + 10;
+  });
+  window.addEventListener("pointerup", () => { Shop.pouringId = null; Shop.pourOverBaguette = false; });
+  window.addEventListener("pointercancel", () => { Shop.pouringId = null; Shop.pourOverBaguette = false; });
 
   let buttons = []; // active clickable regions for current scene: {x,y,w,h,label,sub,onClick,disabled,style}
   function addButton(b) { buttons.push(b); return b; }
@@ -531,7 +609,10 @@
     ovenAnimDur: 0,
     insertProgress: 0, // 0-1, how far the peel has been dragged into the oven
     peelDragging: false,
-    selectedToppings: [],
+    toppingParticles: {}, // id -> array of {fx,fy,fs} sprinkles poured so far
+    pouringId: null, // id of the topping bottle currently picked up, or null
+    pourPos: { x: 0, y: 0 },
+    pourOverBaguette: false,
     wobble: 0,
     shapePoints: [],
     shapeTargets: [],
@@ -552,7 +633,10 @@
       this.ovenAnimDur = 0;
       this.insertProgress = 0;
       this.peelDragging = false;
-      this.selectedToppings = [];
+      this.toppingParticles = {};
+      this.pouringId = null;
+      this.pourPos = { x: 0, y: 0 };
+      this.pourOverBaguette = false;
       this.wobble = 0;
       this.shapeDragIndex = -1;
       this.shapeAccuracy = 0;
@@ -608,6 +692,9 @@
         // 'closed', 'opening', 'loading' and 'closing' are all driven by the
         // player dragging a handle, not by time.
       }
+      if (this.step === "TOP" && this.pouringId && this.pourOverBaguette) {
+        this.pourTopping(this.pouringId, dt);
+      }
     },
     pullFromOven() {
       if (this.step !== "BAKE" || this.bakeStage !== "baking") return;
@@ -624,16 +711,24 @@
       Audio8.click();
       this.step = "TOP";
     },
-    toggleTopping(id) {
-      const i = this.selectedToppings.indexOf(id);
-      if (i >= 0) this.selectedToppings.splice(i, 1);
-      else this.selectedToppings.push(id);
-      Audio8.toggle();
+    pourTopping(id, dt) {
+      // Free-form pouring: each tick while the bottle's held over the
+      // baguette adds a few more sprinkles, up to a cap — no toggle, no
+      // fixed amount, just however much the player holds it there for.
+      const MAX_PARTICLES = 40;
+      const POUR_RATE = 26; // particles per second
+      if (!this.toppingParticles[id]) this.toppingParticles[id] = [];
+      const arr = this.toppingParticles[id];
+      if (arr.length >= MAX_PARTICLES) return;
+      const toAdd = Math.min(MAX_PARTICLES - arr.length, Math.max(1, Math.round(POUR_RATE * dt)));
+      for (let i = 0; i < toAdd; i++) {
+        arr.push({ fx: rand(0, 1), fy: rand(0, 1), fs: rand(0, 1) });
+      }
     },
     scoreOrder() {
       const order = Game.order;
       const want = new Set(order.toppings);
-      const got = new Set(this.selectedToppings);
+      const got = new Set(Object.keys(this.toppingParticles).filter((id) => this.toppingParticles[id].length > 0));
       let mismatches = 0;
       want.forEach((t) => { if (!got.has(t)) mismatches++; });
       got.forEach((t) => { if (!want.has(t)) mismatches++; });
@@ -709,7 +804,10 @@
           ctx.fillStyle = "rgba(255,255,255,0.25)";
           ctx.fillRect(bx, by, size.w, size.h);
         }
-        drawToppingsOnBaguette(bx, by, sc, this.selectedToppings);
+        drawToppingParticles(bx, by, sc, this.toppingParticles);
+        if (this.pouringId && this.pourOverBaguette) {
+          drawPourStream(this.pourPos.x, this.pourPos.y, TOPPINGS.find((t) => t.id === this.pouringId).color, this.wobble);
+        }
       }
 
       // Step-specific controls
@@ -739,16 +837,18 @@
         }
       } else if (this.step === "TOP") {
         drawPanelText("Result: " + this.bakeResult.toUpperCase(), 150, 96, 6, this.bakeResult === "perfect" ? PALETTE.green : (this.bakeResult === "good" ? PALETTE.yellow : PALETTE.red));
-        drawPanelText("ADD TOPPINGS TO MATCH:", 14, 108, 6, PALETTE.white);
-        const gridX = 14, tw = 84, th = 20, gap = 4;
+        drawPanelText("PICK UP A BOTTLE & POUR IT ON:", 14, 108, 5.5, PALETTE.white);
         TOPPINGS.forEach((t, i) => {
-          const col = i % 4, row = Math.floor(i / 4);
-          const bx = gridX + col * (tw + gap);
-          const by = 118 + row * (th + gap);
-          const active = this.selectedToppings.includes(t.id);
-          addButton({ x: bx, y: by, w: tw, h: th, label: t.label, active, font: "6px",
-            onClick: () => this.toggleTopping(t.id) });
+          if (this.pouringId === t.id) return; // drawn held, at the pointer, below
+          const r = bottleRackPos(i);
+          const used = (this.toppingParticles[t.id] || []).length > 0;
+          drawBottle(r.x, r.y, t, used, false);
         });
+        if (this.pouringId) {
+          const t = TOPPINGS.find((tp) => tp.id === this.pouringId);
+          drawBottle(this.pourPos.x - BOTTLE_W / 2, this.pourPos.y - BOTTLE_H / 2, t, true, true);
+        }
+        const gridX = 14, tw = 84, gap = 4;
         addButton({ x: gridX, y: 168, w: 4 * tw + 3 * gap, h: 22, label: "WRAP & GO", font:"6px", onClick: () => {
           Audio8.click();
           const result = this.scoreOrder();
