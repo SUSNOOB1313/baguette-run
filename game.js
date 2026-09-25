@@ -38,6 +38,15 @@
   function randi(min, max) { return Math.floor(rand(min, max + 1)); }
   function choice(arr) { return arr[randi(0, arr.length - 1)]; }
   function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
+  // What a delivery actually pays — weighted so most runs land on the $4
+  // floor, with a shrinking chance of a bigger tip up to $7.
+  function deliveryPayout() {
+    const r = Math.random();
+    if (r < 0.65) return 4;
+    if (r < 0.85) return 5;
+    if (r < 0.95) return 6;
+    return 7;
+  }
 
   // ---------------------------------------------------------
   // Tiny WebAudio beeper for 8-bit sfx (no external files)
@@ -866,10 +875,11 @@
         const gridX = 14, tw = 84, gap = 4;
         addButton({ x: gridX, y: 168, w: 4 * tw + 3 * gap, h: 22, label: "WRAP & GO", font:"6px", onClick: () => {
           Audio8.click();
+          // No money changes hands until it's actually delivered — this is
+          // just a quality readout for what's about to head out the door.
           const result = this.scoreOrder();
           Game.lastQuality = result;
-          Game.score += result.points;
-          Game.popupText = result.label + "  +" + result.points;
+          Game.popupText = result.label + "!";
           Game.popupTimer = 1.2;
           Game.scene = "DELIVERY";
           Delivery.reset();
@@ -1217,9 +1227,10 @@
       if (!this.finished && this.player.z >= this.targetZ) {
         this.finished = true;
         this.finishTimer = 1.3;
-        const bonus = Math.round(100 + this.targetZ / 80);
-        Game.score += bonus;
-        Game.popupText = "DELIVERED! +" + bonus;
+        // This is the only moment money actually changes hands.
+        const tip = deliveryPayout();
+        Game.score += tip;
+        Game.popupText = "DELIVERED! +$" + tip;
         Game.popupTimer = 1.3;
         Audio8.success();
       }
@@ -1424,7 +1435,7 @@
     ctx.fillRect(0, 0, W, 20);
     // one hit and it's over, so the HUD shows a single life, not a row of hearts
     drawSprite(ctx, 8, 6, 1.6, Game.lives > 0 ? SPRITES.heart : SPRITES.heartEmpty);
-    drawPanelText("SCORE " + Game.score, 30, 6, 7, PALETTE.yellow);
+    drawPanelText("$" + Game.score, 30, 6, 7, PALETTE.yellow);
     drawPanelText("DAY " + Game.day, W - 10, 6, 6, "#a89a86", "right");
   }
   function drawPopup() {
@@ -1478,7 +1489,7 @@
     ctx.fillStyle = "#1a0f0f";
     ctx.fillRect(0, 0, W, H);
     drawPanelText("GAME OVER", W / 2, 50, 14, PALETTE.red, "center");
-    drawPanelText("Final Score: " + Game.score, W / 2, 90, 8, PALETTE.yellow, "center");
+    drawPanelText("Total Earned: $" + Game.score, W / 2, 90, 8, PALETTE.yellow, "center");
     drawPanelText("Orders Delivered: " + Game.deliveredTotal, W / 2, 105, 7, PALETTE.white, "center");
     drawPanelText("Days Survived: " + Game.day, W / 2, 118, 7, PALETTE.white, "center");
     addButton({

@@ -43,5 +43,7 @@ No build step, no dependencies — just open `index.html` in a browser
 
 Press **P** to pause during either phase.
 
-Score comes from how well the baguette matched the order (Perfect /
-Good / Okay / Ruined) plus a bonus for delivering promptly.
+Wrapping an order shows how well the baguette matched it (Perfect /
+Good / Okay / Ruined), but that's just a quality check — the only
+money you actually earn is the tip paid out when you successfully
+reach the house, usually $4 and occasionally as much as $7.
