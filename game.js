@@ -297,14 +297,18 @@
   function bottleRackPos(i) {
     return { x: BOTTLE_RACK_X + i * (BOTTLE_W + BOTTLE_GAP), y: BOTTLE_RACK_Y };
   }
-  // Where the bottle's cap actually ends up on screen once it's tipped —
-  // the cap sits dead center over the pivot before any rotation, so tilting
-  // swings it out to the side the bottle's tipped toward.
-  function bottleCapPos(x, y, tiltDeg) {
-    const pivotX = x + BOTTLE_W / 2, pivotY = y + BOTTLE_H;
+  // The pointer IS where the cap/spout is — the player is holding the cap
+  // end, not the bottle's geometric center. This inverts the cap's rotation
+  // offset to find where to draw the bottle's (unrotated) anchor so that,
+  // once tilted, its cap lands exactly under the pointer. That keeps the
+  // pour fully WYSIWYG: wherever you point is where it actually lands,
+  // instead of the cap swinging out to one side of the cursor once tilted.
+  function bottleAnchorForCapAt(px, py, tiltDeg) {
     const dy = 0.5 - BOTTLE_H; // cap's offset from the pivot before rotation
     const rad = (tiltDeg * Math.PI) / 180;
-    return { x: pivotX - dy * Math.sin(rad), y: pivotY + dy * Math.cos(rad) };
+    const pivotX = px + dy * Math.sin(rad);
+    const pivotY = py - dy * Math.cos(rad);
+    return { x: pivotX - BOTTLE_W / 2, y: pivotY - BOTTLE_H };
   }
   // tiltDeg tips the bottle around its base, like it's being tipped over to
   // pour — 0 upright on the rack, a little when just picked up, a lot once
@@ -466,22 +470,16 @@
       Shop.pouringId = null; Shop.pourTilted = false; Shop.pourOverBaguette = false; return;
     }
     const p = canvasPointFromEvent(e);
+    // The pointer itself IS the cap/spout position (see bottleAnchorForCapAt)
+    // — the bottle sprite is drawn tilted out from underneath it, but the
+    // pour and the hit-test both just use where the player is actually
+    // pointing, so it's always exactly where it visually looks like it is.
     Shop.pourPos = p;
-    // Lift the bottle up off the rack and it tips over ready to pour — but
-    // tipped-over only means it's spilling. Whether anything actually lands
-    // on the baguette depends on where the CAP ends up once tilted, not on
-    // the raw mouse position (they're offset once the bottle leans over).
     Shop.pourTilted = p.y < BOTTLE_RACK_Y - 4;
     if (Shop.pourTilted) {
-      const cap = bottleCapPos(p.x - BOTTLE_W / 2, p.y - BOTTLE_H / 2, BOTTLE_TILT_POURING);
-      // Test where the stream actually falls (a bit below the cap, same as
-      // drawPourStream's first drop), not the cap's own point — otherwise a
-      // stream that's visibly landing on the baguette can still get called
-      // a miss just because the cap itself sits slightly above it.
-      const landX = cap.x, landY = cap.y + 12;
       const bx = TOP_BAGUETTE_X + 10, by = TOP_BAGUETTE_Y + 20;
       const sz = spriteSize(SPRITES.baguetteBare, 3);
-      Shop.pourOverBaguette = landX >= bx - 8 && landX <= bx + sz.w + 8 && landY >= by - 8 && landY <= by + sz.h + 14;
+      Shop.pourOverBaguette = p.x >= bx - 8 && p.x <= bx + sz.w + 8 && p.y >= by - 8 && p.y <= by + sz.h + 14;
     } else {
       Shop.pourOverBaguette = false;
     }
@@ -863,12 +861,11 @@
         }
         drawToppingParticles(bx, by, sc, this.toppingParticles);
         if (this.pouringId && this.pourTilted) {
-          const cap = bottleCapPos(this.pourPos.x - BOTTLE_W / 2, this.pourPos.y - BOTTLE_H / 2, BOTTLE_TILT_POURING);
           const color = TOPPINGS.find((t) => t.id === this.pouringId).color;
           // Lined up with the baguette: a short stream actually lands on it.
           // Off to the side: a longer stream misses and spills on the counter.
-          if (this.pourOverBaguette) drawPourStream(cap.x, cap.y, color, this.wobble, 2, false);
-          else drawPourStream(cap.x, cap.y, color, this.wobble, 6, true);
+          if (this.pourOverBaguette) drawPourStream(this.pourPos.x, this.pourPos.y, color, this.wobble, 2, false);
+          else drawPourStream(this.pourPos.x, this.pourPos.y, color, this.wobble, 6, true);
         }
       }
 
@@ -913,7 +910,8 @@
         if (this.pouringId) {
           const t = TOPPINGS.find((tp) => tp.id === this.pouringId);
           const tilt = this.pourTilted ? BOTTLE_TILT_POURING : BOTTLE_TILT_HELD;
-          drawBottle(this.pourPos.x - BOTTLE_W / 2, this.pourPos.y - BOTTLE_H / 2, t, true, tilt);
+          const anchor = bottleAnchorForCapAt(this.pourPos.x, this.pourPos.y, tilt);
+          drawBottle(anchor.x, anchor.y, t, true, tilt);
         }
         const gridX = 14, tw = 84, gap = 4;
         addButton({ x: gridX, y: 168, w: 4 * tw + 3 * gap, h: 22, label: "WRAP & GO", font:"6px", onClick: () => {
