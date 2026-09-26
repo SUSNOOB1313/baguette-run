@@ -474,9 +474,14 @@
     Shop.pourTilted = p.y < BOTTLE_RACK_Y - 4;
     if (Shop.pourTilted) {
       const cap = bottleCapPos(p.x - BOTTLE_W / 2, p.y - BOTTLE_H / 2, BOTTLE_TILT_POURING);
+      // Test where the stream actually falls (a bit below the cap, same as
+      // drawPourStream's first drop), not the cap's own point — otherwise a
+      // stream that's visibly landing on the baguette can still get called
+      // a miss just because the cap itself sits slightly above it.
+      const landX = cap.x, landY = cap.y + 12;
       const bx = TOP_BAGUETTE_X + 10, by = TOP_BAGUETTE_Y + 20;
       const sz = spriteSize(SPRITES.baguetteBare, 3);
-      Shop.pourOverBaguette = cap.x >= bx - 4 && cap.x <= bx + sz.w + 4 && cap.y >= by - 4 && cap.y <= by + sz.h + 6;
+      Shop.pourOverBaguette = landX >= bx - 8 && landX <= bx + sz.w + 8 && landY >= by - 8 && landY <= by + sz.h + 14;
     } else {
       Shop.pourOverBaguette = false;
     }
