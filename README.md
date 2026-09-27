@@ -11,7 +11,10 @@ No build step, no dependencies — just open `index.html` in a browser
 ## How to play
 
 **Shop phase**
-1. Read the order card (customer + requested toppings).
+1. Read the order card (customer, product, and requested toppings).
+   Most orders are a whole baguette, but some ask for a tray of
+   Baguette Bites (6 or 12) or a single ring-shaped Bagelette instead —
+   all three can be topped the same way.
 2. Click through **Knead Dough** → **Shape Loaf**.
 3. Drag the oven's door handle **down** to pull it open, then click
    the peel's handle and drag it in to push the baguette to the back

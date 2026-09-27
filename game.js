@@ -122,6 +122,32 @@
         ".aaaaaaaaaaaaaaaa.",
       ],
     },
+    // A single stubby bite-size piece — orders for "bites" draw several of
+    // these side by side instead of one long loaf.
+    baguetteBite: {
+      colors: { a: PALETTE.crustDark, b: PALETTE.crust, c: PALETTE.dough },
+      rows: [
+        ".aaaa.",
+        "abbbba",
+        "bccccb",
+        "abbbba",
+        ".aaaa.",
+      ],
+    },
+    // A small ring-shaped bagel/baguette hybrid for "bagelette" orders.
+    bagelette: {
+      colors: { a: PALETTE.crustDark, b: PALETTE.crust },
+      rows: [
+        "..aaaaaa..",
+        ".aabbbbaa.",
+        "aabb..bbaa",
+        "abb....bba",
+        "abb....bba",
+        "aabb..bbaa",
+        ".aabbbbaa.",
+        "..aaaaaa..",
+      ],
+    },
     houseTarget: {
       colors: { r: "#d94f3c", w: "#f4ead0", d: "#8a5222", y: "#ffcf5c", k: "#241a12" },
       rows: [
@@ -237,8 +263,63 @@
     { id: "choco", label: "Chocolate", color: "#5a3520", icon: "drizzle" },
   ];
 
-  function drawToppingsOnBaguette(x, y, scale, toppingIds) {
-    // baguette body spans roughly cols 1..16, rows 2..4 in the 18-wide grid
+  // What an order can actually be — a whole baguette most of the time, but
+  // sometimes a tray of small bites (6 or 12) or a single ring-shaped
+  // bagelette. All three can still take any of the toppings above.
+  const PRODUCTS = [
+    { id: "baguette", weight: 5 },
+    { id: "bites", weight: 3 },
+    { id: "bagelette", weight: 2 },
+  ];
+  function pickProduct() {
+    const total = PRODUCTS.reduce((s, p) => s + p.weight, 0);
+    let r = Math.random() * total;
+    for (const p of PRODUCTS) {
+      if (r < p.weight) return p.id;
+      r -= p.weight;
+    }
+    return "baguette";
+  }
+  function productSprite(productId) {
+    if (productId === "bites") return SPRITES.baguetteBite;
+    if (productId === "bagelette") return SPRITES.bagelette;
+    return SPRITES.baguetteBare;
+  }
+  function productCount(order) {
+    return order.product === "bites" ? order.biteCount : 1;
+  }
+  function productLabel(order) {
+    if (order.product === "bites") return order.biteCount + " Baguette Bites";
+    if (order.product === "bagelette") return "Bagelette";
+    return "Baguette";
+  }
+  // How many items fit per row (wrapping a dozen bites onto two rows) within
+  // maxW, and the bounding box that whole grid occupies at that scale.
+  function productBoxSize(order, scale, maxW) {
+    const sprite = productSprite(order.product);
+    const count = productCount(order);
+    const itemSize = spriteSize(sprite, scale);
+    const gap = Math.max(2, Math.round(scale * 0.6));
+    const perRow = Math.max(1, Math.min(count, Math.floor((maxW + gap) / (itemSize.w + gap))));
+    const rows = Math.ceil(count / perRow);
+    return { perRow, rows, itemSize, gap, w: perRow * itemSize.w + (perRow - 1) * gap, h: rows * itemSize.h + (rows - 1) * gap };
+  }
+  function drawProductItems(x, y, scale, order, maxW) {
+    const L = productBoxSize(order, scale, maxW);
+    const sprite = productSprite(order.product);
+    let i = 0, count = productCount(order);
+    for (let r = 0; r < L.rows && i < count; r++) {
+      for (let c = 0; c < L.perRow && i < count; c++, i++) {
+        drawSprite(ctx, x + c * (L.itemSize.w + L.gap), y + r * (L.itemSize.h + L.gap), scale, sprite);
+      }
+    }
+    return { x, y, w: L.w, h: L.h };
+  }
+
+  // Both of these scatter dots across a bounding box rather than one fixed
+  // sprite's own column/row layout, so they work the same whether that box
+  // holds one baguette, a grid of bites, or a single bagelette ring.
+  function drawToppingsOnBaguette(box, toppingIds) {
     const seedFor = toppingIds.join("|");
     let seed = 0;
     for (let i = 0; i < seedFor.length; i++) seed = (seed * 31 + seedFor.charCodeAt(i)) >>> 0;
@@ -248,14 +329,14 @@
       if (!t) return;
       ctx.fillStyle = t.color;
       for (let n = 0; n < 26; n++) {
-        const px = x + (1 + prand() * 15) * scale;
-        const py = y + (2 + prand() * 3) * scale;
-        const s = t.icon === "melt" ? scale * 1.4 : scale * (0.6 + prand() * 0.5);
+        const px = box.x + box.w * (0.056 + prand() * 0.833);
+        const py = box.y + box.h * (0.286 + prand() * 0.428);
+        const s = t.icon === "melt" ? box.h * 0.2 : box.h * (0.086 + prand() * 0.071);
         ctx.fillRect(px, py, s, s);
       }
     });
   }
-  function drawToppingParticles(x, y, scale, particlesById) {
+  function drawToppingParticles(box, particlesById) {
     // Renders whatever's actually been poured so far — persistent sprinkle
     // positions (not regenerated each frame) so pouring visibly accumulates
     // instead of jittering.
@@ -266,9 +347,9 @@
       if (!t) return;
       ctx.fillStyle = t.color;
       arr.forEach((p) => {
-        const px = x + (1 + p.fx * 15) * scale;
-        const py = y + (2 + p.fy * 3) * scale;
-        const s = t.icon === "melt" ? scale * 1.4 : scale * (0.6 + p.fs * 0.5);
+        const px = box.x + box.w * (0.056 + p.fx * 0.833);
+        const py = box.y + box.h * (0.286 + p.fy * 0.428);
+        const s = t.icon === "melt" ? box.h * 0.2 : box.h * (0.086 + p.fs * 0.071);
         ctx.fillRect(px, py, s, s);
       });
     });
@@ -477,9 +558,12 @@
     Shop.pourPos = p;
     Shop.pourTilted = p.y < BOTTLE_RACK_Y - 4;
     if (Shop.pourTilted) {
-      const bx = TOP_BAGUETTE_X + 10, by = TOP_BAGUETTE_Y + 20;
-      const sz = spriteSize(SPRITES.baguetteBare, 3);
-      Shop.pourOverBaguette = p.x >= bx - 8 && p.x <= bx + sz.w + 8 && p.y >= by - 8 && p.y <= by + sz.h + 14;
+      // productBox is whatever's actually laid out this order — one
+      // baguette, a grid of bites, or a bagelette — set each TOP-step
+      // render, with a baguette-shaped fallback just in case it's ever
+      // read before the first render.
+      const box = Shop.productBox || { x: TOP_BAGUETTE_X + 10, y: TOP_BAGUETTE_Y + 20, w: 54, h: 21 };
+      Shop.pourOverBaguette = p.x >= box.x - 8 && p.x <= box.x + box.w + 8 && p.y >= box.y - 8 && p.y <= box.y + box.h + 14;
     } else {
       Shop.pourOverBaguette = false;
     }
@@ -576,7 +660,9 @@
       const idx = randi(0, pool.length - 1);
       picked.push(pool.splice(idx, 1)[0].id);
     }
-    return { customer: choice(CUSTOMERS), toppings: picked };
+    const product = pickProduct();
+    const biteCount = product === "bites" ? choice([6, 12]) : 0;
+    return { customer: choice(CUSTOMERS), toppings: picked, product, biteCount };
   }
 
   function startNewOrderFlow() {
@@ -665,6 +751,7 @@
     pourPos: { x: 0, y: 0 },
     pourTilted: false, // lifted up off the rack, tipped over ready to pour
     pourOverBaguette: false, // AND actually lined up with the baguette
+    productBox: null, // this order's item(s) bounding box, set each TOP-step render
     wobble: 0,
     shapePoints: [],
     shapeTargets: [],
@@ -690,6 +777,7 @@
       this.pourPos = { x: 0, y: 0 };
       this.pourTilted = false;
       this.pourOverBaguette = false;
+      this.productBox = null;
       this.wobble = 0;
       this.shapeDragIndex = -1;
       this.shapeAccuracy = 0;
@@ -814,12 +902,11 @@
       ctx.fillRect(cardX, cardY, cardW, cardH);
       ctx.strokeStyle = PALETTE.ink;
       ctx.strokeRect(cardX, cardY, cardW, cardH);
-      const bs = spriteSize(SPRITES.baguetteBare, 2.5);
-      drawSprite(ctx, cardX + (cardW - bs.w) / 2, cardY + 6, 2.5, SPRITES.baguetteBare);
-      drawToppingsOnBaguette(cardX + (cardW - bs.w) / 2, cardY + 6, 2.5, Game.order.toppings);
-      if (Game.order.toppings.length === 0) {
-        drawPanelText("PLAIN", cardX + cardW / 2, cardY + 30, 6, PALETTE.ink, "center");
-      }
+      drawPanelText(productLabel(Game.order), cardX + cardW - 4, cardY + 4, 5, PALETTE.ink, "right");
+      const cardMaxW = cardW - 12;
+      const cardBoxSize = productBoxSize(Game.order, 2.2, cardMaxW);
+      const cardBox = drawProductItems(cardX + (cardW - cardBoxSize.w) / 2, cardY + 13, 2.2, Game.order, cardMaxW);
+      drawToppingsOnBaguette(cardBox, Game.order.toppings);
       ctx.textAlign = "left";
       let ty = cardY + cardH - 16;
       if (Game.order.toppings.length) {
@@ -830,7 +917,7 @@
 
       // Working baguette preview area
       const wx = 150, wy = 50;
-      const panelLabel = this.step === "SHAPE" ? "FORM A " + this.shapeTypeName.toUpperCase() : "YOUR BAGUETTE";
+      const panelLabel = this.step === "SHAPE" ? "FORM A " + this.shapeTypeName.toUpperCase() : "YOUR " + productLabel(Game.order).toUpperCase();
       drawPanelText(panelLabel, wx, 26, this.step === "SHAPE" ? 6 : 7, PALETTE.white);
       const bob = this.step !== "BAKE" ? Math.sin(this.wobble * 4) * 1.5 : 0;
       if (this.step === "KNEAD" ) {
@@ -847,19 +934,19 @@
       } else if (this.step === "BAKE") {
         drawOvenScene(wx, wy, this.bakeStage, this.doorProgress, this.ovenAnimT, this.insertProgress);
       } else {
-        const sc = 3;
-        const size = spriteSize(SPRITES.baguetteBare, sc);
+        const sc = 2.6, maxW = 110;
         const bx = wx + 10, by = wy + 20;
-        drawSprite(ctx, bx, by, sc, SPRITES.baguetteBare);
+        const box = drawProductItems(bx, by, sc, Game.order, maxW);
+        Shop.productBox = box; // read by the pour hit-test in the input handler below
         if (this.bakeResult === "burnt") {
           ctx.fillStyle = "rgba(20,10,5,0.45)";
-          ctx.fillRect(bx, by, size.w, size.h);
+          ctx.fillRect(box.x, box.y, box.w, box.h);
         }
         if (this.bakeResult === "raw") {
           ctx.fillStyle = "rgba(255,255,255,0.25)";
-          ctx.fillRect(bx, by, size.w, size.h);
+          ctx.fillRect(box.x, box.y, box.w, box.h);
         }
-        drawToppingParticles(bx, by, sc, this.toppingParticles);
+        drawToppingParticles(box, this.toppingParticles);
         if (this.pouringId && this.pourTilted) {
           const color = TOPPINGS.find((t) => t.id === this.pouringId).color;
           // Lined up with the baguette: a short stream actually lands on it.
@@ -1010,7 +1097,7 @@
     ctx.lineWidth = 1;
     ctx.strokeRect(px - 24, py - 4, 48, 8);
     if (carrying) {
-      drawSprite(ctx, px - 18, py - 14, 2, SPRITES.baguetteBare);
+      drawSprite(ctx, px - 18, py - 14, 2, productSprite(Game.order.product));
     }
   }
   function drawOvenScene(x, y, bakeStage, doorProgress, animT, insertProgress) {
@@ -1040,11 +1127,11 @@
         drawPeel(x + 40, py, true, true);
       } else if (bakeStage === "retracting") {
         // Baguette dropped at the back; the empty peel slides back out on its own.
-        drawSprite(ctx, x + 30, y + 18, 2.5, SPRITES.baguetteBare);
+        drawSprite(ctx, x + 30, y + 18, 2.5, productSprite(Game.order.product));
         const py = backY + (frontY - backY) * animT;
         drawPeel(x + 40, py, false, false);
       } else if (bakeStage === "closing") {
-        drawSprite(ctx, x + 30, y + 18, 2.5, SPRITES.baguetteBare);
+        drawSprite(ctx, x + 30, y + 18, 2.5, productSprite(Game.order.product));
       }
     }
 
@@ -1464,8 +1551,8 @@
     const bx = W - 56, by = H - 38;
     ctx.fillStyle = "#6b4426";
     ctx.fillRect(bx, by + 8, 40, 20);
-    drawSprite(ctx, bx + 1, by - 4, 1.5, SPRITES.baguetteBare);
-    drawToppingsOnBaguette(bx + 1, by - 4, 1.5, Game.order.toppings);
+    const basketBox = drawProductItems(bx + 1, by - 4, 1.3, Game.order, 38);
+    drawToppingsOnBaguette(basketBox, Game.order.toppings);
   }
 
   // ---------------------------------------------------------
@@ -1512,8 +1599,9 @@
     const sc = 4;
     const sz = spriteSize(SPRITES.baguetteBare, sc);
     const bob = Math.sin(performance.now() / 300) * 4;
-    drawSprite(ctx, W / 2 - sz.w / 2, 40 + bob, sc, SPRITES.baguetteBare);
-    drawToppingsOnBaguette(W / 2 - sz.w / 2, 40 + bob, sc, ["cinnamon", "sugar"]);
+    const titleX = W / 2 - sz.w / 2, titleY = 40 + bob;
+    drawSprite(ctx, titleX, titleY, sc, SPRITES.baguetteBare);
+    drawToppingsOnBaguette({ x: titleX, y: titleY, w: sz.w, h: sz.h }, ["cinnamon", "sugar"]);
 
     drawPanelText("Run a bakery. Fill orders.", W / 2, 110, 7, PALETTE.white, "center");
     drawPanelText("Ride the street to deliver!", W / 2, 122, 7, PALETTE.white, "center");
