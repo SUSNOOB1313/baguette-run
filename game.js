@@ -354,8 +354,12 @@
       });
     });
   }
-  function drawPourStream(x, y, color, wobble, drops, splat) {
+  function drawPourStream(x, y, color, wobble, length, splat) {
+    // length is how far down the stream actually has to fall, in pixels —
+    // dynamic so it visually reaches the food whether the bottle's held
+    // right over it or lifted way up above it.
     ctx.fillStyle = color;
+    const drops = Math.max(1, Math.round(length / 6));
     let sy = y + 8;
     for (let i = 0; i < drops; i++) {
       sy += 6;
@@ -563,7 +567,11 @@
       // render, with a baguette-shaped fallback just in case it's ever
       // read before the first render.
       const box = Shop.productBox || { x: TOP_BAGUETTE_X + 10, y: TOP_BAGUETTE_Y + 20, w: 54, h: 21 };
-      Shop.pourOverBaguette = p.x >= box.x - 8 && p.x <= box.x + box.w + 8 && p.y >= box.y - 8 && p.y <= box.y + box.h + 14;
+      // Only x-alignment and "not below it" matter — holding the bottle
+      // high above the food and letting the stream fall onto it from up
+      // there is exactly how pouring is supposed to work, so there's no
+      // ceiling on how far above the food the cursor can be.
+      Shop.pourOverBaguette = p.x >= box.x - 8 && p.x <= box.x + box.w + 8 && p.y <= box.y + box.h + 14;
     } else {
       Shop.pourOverBaguette = false;
     }
@@ -949,10 +957,15 @@
         drawToppingParticles(box, this.toppingParticles);
         if (this.pouringId && this.pourTilted) {
           const color = TOPPINGS.find((t) => t.id === this.pouringId).color;
-          // Lined up with the baguette: a short stream actually lands on it.
-          // Off to the side: a longer stream misses and spills on the counter.
-          if (this.pourOverBaguette) drawPourStream(this.pourPos.x, this.pourPos.y, color, this.wobble, 2, false);
-          else drawPourStream(this.pourPos.x, this.pourPos.y, color, this.wobble, 6, true);
+          if (this.pourOverBaguette) {
+            // Lined up with the food: the stream actually falls all the way
+            // down to it, however high above it the bottle's being held.
+            const fallDist = Math.max(10, box.y + box.h / 2 - this.pourPos.y);
+            drawPourStream(this.pourPos.x, this.pourPos.y, color, this.wobble, fallDist, false);
+          } else {
+            // Off to the side: it just spills on the counter instead.
+            drawPourStream(this.pourPos.x, this.pourPos.y, color, this.wobble, 40, true);
+          }
         }
       }
 
