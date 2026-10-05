@@ -872,8 +872,15 @@
       const arr = this.toppingParticles[id];
       if (arr.length >= SAFETY_CEILING) return;
       const toAdd = Math.min(SAFETY_CEILING - arr.length, Math.max(1, Math.round(POUR_RATE * dt)));
+      // It piles up wherever the stream is actually falling (the cursor's x
+      // within the food), not scattered across the whole thing — pour on
+      // the left and it builds up on the left. The stream falls straight
+      // down regardless of how high the bottle's held, so only x tracks the
+      // cursor; y stays spread across the food's own height, same as before.
+      const box = this.productBox;
+      const localX = box ? clamp((this.pourPos.x - box.x) / box.w, 0, 1) : 0.5;
       for (let i = 0; i < toAdd; i++) {
-        arr.push({ fx: rand(0, 1), fy: rand(0, 1), fs: rand(0, 1) });
+        arr.push({ fx: clamp(localX + (rand(0, 1) - 0.5) * 0.16, 0, 1), fy: rand(0, 1), fs: rand(0, 1) });
       }
     },
     scoreOrder() {
