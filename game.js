@@ -742,8 +742,7 @@
 
   const Shop = {
     step: "KNEAD", // KNEAD -> SHAPE -> BAKE -> TOP -> WRAP -> DONE
-    bakeNeedle: 0,
-    bakeDir: 1,
+    bakeProgress: 0, // 0 = raw dough, climbs steadily while baking — no needle, just watch the color
     bakeSpeed: 1.7,
     bakeResult: null, // 'perfect' | 'good' | 'burnt' | 'raw'
     // closed -> opening -> loading -> retracting -> closing -> baking
@@ -769,9 +768,10 @@
     shapeTypeName: "Baguette",
     reset() {
       this.step = "KNEAD";
-      this.bakeNeedle = 0;
-      this.bakeDir = 1;
-      this.bakeSpeed = 1.6 + Game.day * 0.15;
+      this.bakeProgress = 0;
+      // Paced so there's real time to watch it change color and react —
+      // roughly 11s to burnt on day 1, down to ~6s by day 10.
+      this.bakeSpeed = 0.1 + Game.day * 0.012;
       this.bakeResult = null;
       this.bakeStage = "closed";
       this.doorProgress = 0;
@@ -834,9 +834,9 @@
             this.ovenAnimT = 0;
           }
         } else if (this.bakeStage === "baking") {
-          this.bakeNeedle += this.bakeDir * this.bakeSpeed * dt;
-          if (this.bakeNeedle > 1) { this.bakeNeedle = 1; this.bakeDir = -1; }
-          if (this.bakeNeedle < 0) { this.bakeNeedle = 0; this.bakeDir = 1; }
+          // No needle, no bouncing back — it just keeps darkening until
+          // it's pulled out, same as a real oven.
+          this.bakeProgress += this.bakeSpeed * dt;
         }
         // 'closed', 'opening', 'loading' and 'closing' are all driven by the
         // player dragging a handle, not by time.
@@ -847,7 +847,7 @@
     },
     pullFromOven() {
       if (this.step !== "BAKE" || this.bakeStage !== "baking") return;
-      const n = this.bakeNeedle;
+      const n = this.bakeProgress;
       // Perfect zone centered ~0.62 (golden brown), width tuned by day (harder = narrower)
       const center = 0.62;
       const perfectHalf = clamp(0.09 - Game.day * 0.004, 0.04, 0.09);
@@ -947,7 +947,7 @@
         drawPanelText("ACCURACY " + this.shapeAccuracy + "%", 150, 120, 6,
           this.shapeAccuracy >= 55 ? PALETTE.green : this.shapeAccuracy >= 35 ? PALETTE.yellow : PALETTE.red);
       } else if (this.step === "BAKE") {
-        drawOvenScene(wx, wy, this.bakeStage, this.doorProgress, this.ovenAnimT, this.insertProgress);
+        drawOvenScene(wx, wy, this.bakeStage, this.doorProgress, this.ovenAnimT, this.insertProgress, this.bakeProgress);
       } else {
         const sc = 2.6, maxW = 110;
         const bx = wx + 10, by = wy + 20;
@@ -986,7 +986,6 @@
           onClick: () => { Audio8.click(); this.step = "BAKE"; },
         });
       } else if (this.step === "BAKE") {
-        drawBakeGauge(150, 130);
         if (this.bakeStage === "closed") {
           drawPanelText("DRAG THE HANDLE DOWN", 150, 116, 6, PALETTE.yellow);
         } else if (this.bakeStage === "opening") {
@@ -998,8 +997,9 @@
         } else if (this.bakeStage === "closing") {
           drawPanelText("DRAG THE HANDLE UP", 150, 116, 6, PALETTE.yellow);
         } else {
-          drawPanelText("PRESS B TO BAKE!", 150, 116, 6, PALETTE.yellow);
-          addButton({ x: 260, y: 60, w: 110, h: 34, label: "BAKE IT!", sub: "(B)", onClick: () => this.pullFromOven() });
+          drawPanelText("WATCH THE COLOR THROUGH", 150, 112, 6, PALETTE.yellow);
+          drawPanelText("THE WINDOW — PULL IT AT GOLDEN!", 150, 122, 5, PALETTE.yellow);
+          addButton({ x: 260, y: 60, w: 110, h: 34, label: "PULL IT OUT!", sub: "(B)", onClick: () => this.pullFromOven() });
         }
       } else if (this.step === "TOP") {
         drawPanelText("Result: " + this.bakeResult.toUpperCase(), 150, 96, 6, this.bakeResult === "perfect" ? PALETTE.green : (this.bakeResult === "good" ? PALETTE.yellow : PALETTE.red));
@@ -1084,6 +1084,65 @@
     ctx.strokeStyle = PALETTE.ink;
     ctx.strokeRect(x, y, w, h);
   }
+  // Baking has no needle or gauge — the bread itself just gradually
+  // darkens from raw dough through golden-brown to burnt-black, and the
+  // player watches that and decides when to pull it.
+  function hexToRgb(hex) {
+    const n = parseInt(hex.slice(1), 16);
+    return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+  }
+  function lerpColor(a, b, t) {
+    const ca = hexToRgb(a), cb = hexToRgb(b);
+    const r = Math.round(ca[0] + (cb[0] - ca[0]) * t);
+    const g = Math.round(ca[1] + (cb[1] - ca[1]) * t);
+    const bl = Math.round(ca[2] + (cb[2] - ca[2]) * t);
+    return `rgb(${r},${g},${bl})`;
+  }
+  const BAKE_COLOR_STOPS = [
+    { t: 0, c: "#f0d9a0" },    // raw dough
+    { t: 0.62, c: "#c98a3f" }, // golden brown (the sweet spot)
+    { t: 0.97, c: "#8a5222" }, // getting dark
+    { t: 1.25, c: "#1d1309" }, // burnt black
+  ];
+  function bakeColorAt(progress) {
+    if (progress <= BAKE_COLOR_STOPS[0].t) return BAKE_COLOR_STOPS[0].c;
+    for (let i = 1; i < BAKE_COLOR_STOPS.length; i++) {
+      if (progress <= BAKE_COLOR_STOPS[i].t) {
+        const t = (progress - BAKE_COLOR_STOPS[i - 1].t) / (BAKE_COLOR_STOPS[i].t - BAKE_COLOR_STOPS[i - 1].t);
+        return lerpColor(BAKE_COLOR_STOPS[i - 1].c, BAKE_COLOR_STOPS[i].c, t);
+      }
+    }
+    return BAKE_COLOR_STOPS[BAKE_COLOR_STOPS.length - 1].c;
+  }
+  function drawBakingWindow(x, y, progress) {
+    // The door stays shut while it bakes (like a real oven), but there's a
+    // window — the bread's actual color shows through it, live.
+    ctx.fillStyle = "#3a2a1e";
+    ctx.fillRect(x + 8, y + 12, 114, 44);
+    const wx = x + 22, wy = y + 20, ww = 86, wh = 24;
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(wx, wy, ww, wh);
+    ctx.clip();
+    ctx.fillStyle = "#1a0f08";
+    ctx.fillRect(wx, wy, ww, wh);
+    const sprite = productSprite(Game.order.product);
+    const sc = 1.8;
+    const sz = spriteSize(sprite, sc);
+    const sx = wx + (ww - sz.w) / 2, sy = wy + (wh - sz.h) / 2;
+    drawSprite(ctx, sx, sy, sc, sprite);
+    ctx.fillStyle = bakeColorAt(progress);
+    ctx.globalAlpha = clamp(progress * 3, 0.25, 0.62);
+    ctx.fillRect(sx, sy, sz.w, sz.h);
+    ctx.globalAlpha = 1;
+    const flick = 0.08 + Math.abs(Math.sin(performance.now() / 90)) * 0.08;
+    ctx.fillStyle = `rgba(255,140,40,${flick})`;
+    ctx.fillRect(wx, wy, ww, wh);
+    ctx.restore();
+    ctx.strokeStyle = PALETTE.ink;
+    ctx.lineWidth = 1;
+    ctx.strokeRect(wx, wy, ww, wh);
+  }
   function drawOvenDoor(x, y, frac) {
     // Closed oven door: solid panel with a glowing window.
     // frac: 1 = fully closed, shrinks toward 0 as the door lifts open.
@@ -1120,7 +1179,7 @@
       drawSprite(ctx, px - 18, py - 14, 2, productSprite(Game.order.product));
     }
   }
-  function drawOvenScene(x, y, bakeStage, doorProgress, animT, insertProgress) {
+  function drawOvenScene(x, y, bakeStage, doorProgress, animT, insertProgress, bakeProgress) {
     ctx.fillStyle = "#1a1210";
     ctx.fillRect(x, y + 4, 130, 60);
     ctx.strokeStyle = PALETTE.yellow;
@@ -1155,7 +1214,11 @@
       }
     }
 
-    drawOvenDoor(x, y, 1 - doorProgress);
+    if (bakeStage === "baking") {
+      drawBakingWindow(x, y, bakeProgress);
+    } else {
+      drawOvenDoor(x, y, 1 - doorProgress);
+    }
 
     ctx.restore();
 
@@ -1165,25 +1228,6 @@
       const closedY = y + 16, openY = y + 54;
       drawOvenHandle(x + 65, closedY + (openY - closedY) * doorProgress, true);
     }
-  }
-  function drawBakeGauge(x, y) {
-    const w = 190, h = 16;
-    ctx.fillStyle = "#241a12";
-    ctx.fillRect(x, y, w, h);
-    const center = 0.62;
-    const perfectHalf = clamp(0.09 - Game.day * 0.004, 0.04, 0.09);
-    const goodHalf = perfectHalf + 0.12;
-    ctx.fillStyle = "#6b3520";
-    ctx.fillRect(x + (center - goodHalf) * w, y, goodHalf * 2 * w, h);
-    ctx.fillStyle = PALETTE.yellow;
-    ctx.fillRect(x + (center - perfectHalf) * w, y, perfectHalf * 2 * w, h);
-    ctx.fillStyle = PALETTE.white;
-    const nx = x + Shop.bakeNeedle * w;
-    ctx.fillRect(nx - 2, y - 5, 4, h + 10);
-    ctx.strokeStyle = PALETTE.ink;
-    ctx.strokeRect(x, y, w, h);
-    drawPanelText("raw", x - 2, y + h + 4, 5, "#aaa");
-    drawPanelText("burnt", x + w - 22, y + h + 4, 5, "#aaa");
   }
 
   // ---------------------------------------------------------

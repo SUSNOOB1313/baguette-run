@@ -19,9 +19,10 @@ No build step, no dependencies — just open `index.html` in a browser
 3. Drag the oven's door handle **down** to pull it open, then click
    the peel's handle and drag it in to push the baguette to the back
    of the oven. Once it's loaded, drag the door handle back **up** to
-   close the oven, then watch the bake gauge and press **B** to bake
-   when the needle is in the golden zone — too early is raw, too late
-   is burnt.
+   close the oven. There's no gauge or needle — just watch the bread's
+   actual color through the oven window as it bakes (pale dough →
+   golden brown → black) and press **B** to pull it whenever it looks
+   right to you. Too pale is raw, too dark is burnt.
 4. Pick up a topping bottle and lift it up to tip it over — hold it
    there as long as you like for a heavier coating, or just dab it
    for a light one. It only actually lands if the bottle's cap is
