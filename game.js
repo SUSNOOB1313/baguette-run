@@ -509,6 +509,7 @@
       Shop.insertProgress = clamp((frontY - p.y) / (frontY - backY), 0, 1);
       if (Shop.insertProgress >= 1) {
         Shop.peelDragging = false;
+        Shop.loadedCount++;
         Shop.bakeStage = "retracting";
         Shop.ovenAnimT = 0;
         Shop.ovenAnimDur = 0.4;
@@ -752,6 +753,7 @@
     ovenAnimT: 0,
     ovenAnimDur: 0,
     insertProgress: 0, // 0-1, how far the peel has been dragged into the oven
+    loadedCount: 0, // how many of the order's items have been loaded in so far
     peelDragging: false,
     toppingParticles: {}, // id -> array of {fx,fy,fs} sprinkles poured so far
     pouringId: null, // id of the topping bottle currently picked up, or null
@@ -779,6 +781,7 @@
       this.ovenAnimT = 0;
       this.ovenAnimDur = 0;
       this.insertProgress = 0;
+      this.loadedCount = 0;
       this.peelDragging = false;
       this.toppingParticles = {};
       this.pouringId = null;
@@ -827,11 +830,19 @@
       if (this.step === "BAKE") {
         if (this.bakeStage === "retracting") {
           // The only auto-advancing beat: the emptied peel slides itself
-          // back out once the baguette's been dropped at the back.
+          // back out once the item's been dropped at the back. The door
+          // only gets opened once — if there's more to load (a tray of
+          // bites), go straight back to loading the next one instead of
+          // closing up.
           this.ovenAnimT += dt / this.ovenAnimDur;
           if (this.ovenAnimT >= 1) {
-            this.bakeStage = "closing";
             this.ovenAnimT = 0;
+            if (this.loadedCount < productCount(Game.order)) {
+              this.bakeStage = "loading";
+              this.insertProgress = 0;
+            } else {
+              this.bakeStage = "closing";
+            }
           }
         } else if (this.bakeStage === "baking") {
           // No needle, no bouncing back — it just keeps darkening until
@@ -991,9 +1002,11 @@
         } else if (this.bakeStage === "opening") {
           drawPanelText("PULLING OPEN...", 150, 116, 6, PALETTE.yellow);
         } else if (this.bakeStage === "loading") {
-          drawPanelText("DRAG THE PEEL IN!", 150, 116, 6, PALETTE.yellow);
+          const total = productCount(Game.order);
+          drawPanelText(total > 1 ? `DRAG THE PEEL IN! (${this.loadedCount + 1}/${total})` : "DRAG THE PEEL IN!", 150, 116, 6, PALETTE.yellow);
         } else if (this.bakeStage === "retracting") {
-          drawPanelText("LOADED!", 150, 116, 6, PALETTE.yellow);
+          const total = productCount(Game.order);
+          drawPanelText(total > 1 && this.loadedCount < total ? `LOADED ${this.loadedCount}/${total}!` : "LOADED!", 150, 116, 6, PALETTE.yellow);
         } else if (this.bakeStage === "closing") {
           drawPanelText("DRAG THE HANDLE UP", 150, 116, 6, PALETTE.yellow);
         } else {
@@ -1179,6 +1192,24 @@
       drawSprite(ctx, px - 18, py - 14, 2, productSprite(Game.order.product));
     }
   }
+  // Each item the order needs (a single baguette/bagelette, or every bite
+  // in a tray) has to be individually carried in on the peel — only the
+  // door itself is a one-time open/close. Already-placed items sit at the
+  // back and accumulate; a single item keeps its old, larger spot, while a
+  // tray of bites lays out in a small grid as it fills up.
+  function drawOvenLoadedItems(x, y, count) {
+    if (count <= 0) return;
+    const sprite = productSprite(Game.order.product);
+    if (productCount(Game.order) <= 1) {
+      drawSprite(ctx, x + 30, y + 18, 2.5, sprite);
+      return;
+    }
+    const cols = 6, itemW = 9, itemH = 7, gap = 2;
+    for (let i = 0; i < count; i++) {
+      const col = i % cols, row = Math.floor(i / cols);
+      drawSprite(ctx, x + 18 + col * (itemW + gap), y + 16 + row * (itemH + gap), 1.4, sprite);
+    }
+  }
   function drawOvenScene(x, y, bakeStage, doorProgress, animT, insertProgress, bakeProgress) {
     ctx.fillStyle = "#1a1210";
     ctx.fillRect(x, y + 4, 130, 60);
@@ -1200,17 +1231,19 @@
 
       const backY = y + 18, frontY = y + 52;
       if (bakeStage === "loading") {
-        // Waiting on the player to drag the peel handle in to push the
-        // baguette to the back — it only moves as far as they've dragged it.
+        // Whatever's already been placed sits at the back; waiting on the
+        // player to drag the peel handle in to push the next one back too
+        // — it only moves as far as they've dragged it.
+        drawOvenLoadedItems(x, y, Shop.loadedCount);
         const py = frontY - (frontY - backY) * insertProgress;
         drawPeel(x + 40, py, true, true);
       } else if (bakeStage === "retracting") {
-        // Baguette dropped at the back; the empty peel slides back out on its own.
-        drawSprite(ctx, x + 30, y + 18, 2.5, productSprite(Game.order.product));
+        // Just dropped at the back; the empty peel slides back out on its own.
+        drawOvenLoadedItems(x, y, Shop.loadedCount);
         const py = backY + (frontY - backY) * animT;
         drawPeel(x + 40, py, false, false);
       } else if (bakeStage === "closing") {
-        drawSprite(ctx, x + 30, y + 18, 2.5, productSprite(Game.order.product));
+        drawOvenLoadedItems(x, y, Shop.loadedCount);
       }
     }
 

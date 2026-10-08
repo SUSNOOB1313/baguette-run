@@ -16,13 +16,15 @@ No build step, no dependencies — just open `index.html` in a browser
    Baguette Bites (6 or 12) or a single ring-shaped Bagelette instead —
    all three can be topped the same way.
 2. Click through **Knead Dough** → **Shape Loaf**.
-3. Drag the oven's door handle **down** to pull it open, then click
-   the peel's handle and drag it in to push the baguette to the back
-   of the oven. Once it's loaded, drag the door handle back **up** to
-   close the oven. There's no gauge or needle — just watch the bread's
-   actual color through the oven window as it bakes (pale dough →
-   golden brown → black) and press **B** to pull it whenever it looks
-   right to you. Too pale is raw, too dark is burnt.
+3. Drag the oven's door handle **down** to pull it open — just once,
+   even for a tray of bites. Then click the peel's handle and drag it
+   in to push an item to the back; for a tray, drag it in again for
+   each remaining bite one at a time (no need to reopen the door
+   between them). Once everything's loaded, drag the door handle back
+   **up** to close the oven. There's no gauge or needle — just watch
+   the bread's actual color through the oven window as it bakes (pale
+   dough → golden brown → black) and press **B** to pull it whenever
+   it looks right to you. Too pale is raw, too dark is burnt.
 4. Pick up a topping bottle and lift it up to tip it over — hold it
    there as long as you like for a heavier coating, or just dab it
    for a light one. It only actually lands if the bottle's cap is
