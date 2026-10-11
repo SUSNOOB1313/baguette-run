@@ -52,6 +52,8 @@ No build step, no dependencies — just open `index.html` in a browser
 Press **P** to pause during either phase.
 
 Wrapping an order shows how well the baguette matched it (Perfect /
-Good / Okay / Ruined), but that's just a quality check — the only
-money you actually earn is the tip paid out when you successfully
-reach the house, usually $4 and occasionally as much as $7.
+Good / Okay / Ruined), and that quality follows you to the door: the
+tip itself starts at $4-$7, then gets docked for a raw or burnt bake,
+for each topping that's wrong or missing, and for how far off the
+loaf's shape was from the order — a truly ruined order can knock the
+tip all the way down to nothing.

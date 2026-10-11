@@ -38,6 +38,11 @@
   function randi(min, max) { return Math.floor(rand(min, max + 1)); }
   function choice(arr) { return arr[randi(0, arr.length - 1)]; }
   function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
+  // Deductions can leave a tip at a quarter-dollar instead of a whole one —
+  // show cents only when there actually are any.
+  function formatMoney(n) {
+    return Number.isInteger(n) ? String(n) : n.toFixed(2);
+  }
   // What a delivery actually pays — weighted so most runs land on the $4
   // floor, with a shrinking chance of a bigger tip up to $7.
   function deliveryPayout() {
@@ -46,6 +51,17 @@
     if (r < 0.85) return 5;
     if (r < 0.95) return 6;
     return 7;
+  }
+  // Docked from the tip for exactly what went wrong with the order that was
+  // wrapped — a bad bake and a shape miss stack independently, so a truly
+  // ruined order can knock the tip all the way down to nothing.
+  function qualityDeduction(quality) {
+    if (!quality) return 0;
+    let d = 0;
+    if (quality.bakeResult === "raw" || quality.bakeResult === "burnt") d += 1;
+    d += 0.5 * (quality.mismatches || 0); // each wrong or missing topping
+    d += (1 - clamp(quality.shapeAccuracy || 0, 0, 100) / 100) * 1.5; // worse shape, bigger cut
+    return d;
   }
 
   // ---------------------------------------------------------
@@ -907,7 +923,9 @@
       rank = clamp(rank, 0, 3);
       const labels = ["RUINED", "OKAY", "GOOD", "PERFECT"];
       const points = [10, 40, 75, 120];
-      return { rank, label: labels[rank], points: points[rank] };
+      // mismatches/bakeResult/shapeAccuracy ride along so the delivery tip
+      // can dock pay for exactly what went wrong, not just show a label.
+      return { rank, label: labels[rank], points: points[rank], mismatches, bakeResult: this.bakeResult, shapeAccuracy: this.shapeAccuracy };
     },
     render() {
       buttons = [];
@@ -1452,10 +1470,14 @@
       if (!this.finished && this.player.z >= this.targetZ) {
         this.finished = true;
         this.finishTimer = 1.3;
-        // This is the only moment money actually changes hands.
-        const tip = deliveryPayout();
+        // This is the only moment money actually changes hands — the base
+        // tip, minus whatever got docked for a bad bake, wrong/missing
+        // toppings, or a sloppy shape on the order that was wrapped.
+        const baseTip = deliveryPayout();
+        const deduction = qualityDeduction(Game.lastQuality);
+        const tip = Math.max(0, Math.round((baseTip - deduction) * 4) / 4);
         Game.score += tip;
-        Game.popupText = "DELIVERED! +$" + tip;
+        Game.popupText = "DELIVERED! +$" + formatMoney(tip);
         Game.popupTimer = 1.3;
         Audio8.success();
       }
@@ -1660,7 +1682,7 @@
     ctx.fillRect(0, 0, W, 20);
     // one hit and it's over, so the HUD shows a single life, not a row of hearts
     drawSprite(ctx, 8, 6, 1.6, Game.lives > 0 ? SPRITES.heart : SPRITES.heartEmpty);
-    drawPanelText("$" + Game.score, 30, 6, 7, PALETTE.yellow);
+    drawPanelText("$" + formatMoney(Game.score), 30, 6, 7, PALETTE.yellow);
     drawPanelText("DAY " + Game.day, W - 10, 6, 6, "#a89a86", "right");
   }
   function drawPopup() {
@@ -1715,7 +1737,7 @@
     ctx.fillStyle = "#1a0f0f";
     ctx.fillRect(0, 0, W, H);
     drawPanelText("GAME OVER", W / 2, 50, 14, PALETTE.red, "center");
-    drawPanelText("Total Earned: $" + Game.score, W / 2, 90, 8, PALETTE.yellow, "center");
+    drawPanelText("Total Earned: $" + formatMoney(Game.score), W / 2, 90, 8, PALETTE.yellow, "center");
     drawPanelText("Orders Delivered: " + Game.deliveredTotal, W / 2, 105, 7, PALETTE.white, "center");
     drawPanelText("Days Survived: " + Game.day, W / 2, 118, 7, PALETTE.white, "center");
     addButton({
