@@ -664,7 +664,8 @@
   const Game = {
     scene: "TITLE",
     score: 0,
-    lives: 1,
+    maxLives: 3,
+    lives: 3,
     day: 1,
     ordersThisDay: 0,
     ordersPerDay: 3,
@@ -698,7 +699,8 @@
 
   function resetGame() {
     Game.score = 0;
-    Game.lives = 1;
+    Game.maxLives = 3;
+    Game.lives = Game.maxLives;
     Game.day = 1;
     Game.ordersThisDay = 0;
     Game.ordersPerDay = 3;
@@ -1288,17 +1290,17 @@
   const ROAD_HALF = 1000;      // half road width, in world units
   const RUMBLE_LEN = 3;        // segments per rumble/grass color band
   const LANES = [-620, 0, 620];
-  const CAR_HALF_W = 280, PLAYER_HALF_W = 80;
+  const CAR_HALF_W = 240, PLAYER_HALF_W = 80;
   const CAMERA_DEPTH = 1 / Math.tan((100 / 2) * Math.PI / 180);
   const CAMERA_HEIGHT = 1000;
   const DRAW_DIST = 130;       // segments rendered each frame
   const HORIZON = H * 0.46;
   const X_FACTOR = 64;
   const Y_FACTOR = 26000 * (CAMERA_HEIGHT / 1000);
-  const STEER_SPEED = 1950;
+  const STEER_SPEED = 2250;
   const STOP_ZONE = 1300;      // world units before the house where the bike brakes to a stop
   const ROAD_LIMIT = ROAD_HALF - PLAYER_HALF_W; // how far off-center the bike can steer, keeping it on the pavement
-  function baseSpeed(day) { return 2350 + Math.min(day, 12) * 120; }
+  function baseSpeed(day) { return 2050 + Math.min(day, 12) * 95; }
 
   const Delivery = {
     segments: [],
@@ -1340,7 +1342,7 @@
             st.curveDir = Math.random() < 0.5 ? -1 : 1;
             st.chunkLen = randi(18, 34);
             st.phase = 0;
-            st.curveMag = (0.9 + Math.random() * 1.0) * (1 + Math.min(Game.day, 10) * 0.05);
+            st.curveMag = (0.65 + Math.random() * 0.75) * (1 + Math.min(Game.day, 10) * 0.035);
           } else {
             st.remaining = randi(14, 30);
           }
@@ -1371,13 +1373,13 @@
       const farEnoughFromLastCar = segZ > this.lastCarZ + 620;
       const shortOfDriveway = segZ < this.targetZ - STOP_ZONE - 300;
       if (farEnoughFromPlayer && farEnoughFromLastCar && shortOfDriveway
-          && Math.random() < (0.26 + Math.min(Game.day, 10) * 0.024)) {
-        const oncomingChance = 0.55 + Math.min(Game.day, 10) * 0.025;
+          && Math.random() < (0.19 + Math.min(Game.day, 10) * 0.017)) {
+        const oncomingChance = 0.45 + Math.min(Game.day, 10) * 0.02;
         const oncoming = Math.random() < oncomingChance;
         this.cars.push({
           z: segZ,
           laneX: choice(LANES),
-          vz: oncoming ? -rand(380, 760) : rand(0, 260),
+          vz: oncoming ? -rand(300, 600) : rand(0, 220),
           kind: oncoming ? "front" : "rear",
           color: choice(["#d94f3c", "#4f8ad9", "#ffcf5c", "#8a5cc9", "#57b567"]),
         });
@@ -1410,7 +1412,7 @@
     respawnAfterCrash() {
       this.player.z = Math.max(0, this.player.z - 700);
       this.player.laneOffset *= 0.3;
-      Game.invuln = 1.4;
+      Game.invuln = 2.0;
     },
 
     update(dt) {
@@ -1432,7 +1434,7 @@
 
       const throttle = (keys.has("ArrowUp") || keys.has("KeyW")) ? 1 : (keys.has("ArrowDown") || keys.has("KeyS")) ? -1 : 0;
       const cruise = baseSpeed(Game.day);
-      let targetSpeed = throttle > 0 ? cruise * 1.42 : throttle < 0 ? cruise * 0.55 : cruise;
+      let targetSpeed = throttle > 0 ? cruise * 1.28 : throttle < 0 ? cruise * 0.55 : cruise;
       const distToEnd = this.targetZ - this.player.z;
       if (distToEnd < STOP_ZONE) {
         // brake to a stop as the house comes up, so the road's end is a real stop, not a fly-by
@@ -1680,9 +1682,10 @@
   function drawHUD() {
     ctx.fillStyle = "rgba(10,6,16,0.55)";
     ctx.fillRect(0, 0, W, 20);
-    // one hit and it's over, so the HUD shows a single life, not a row of hearts
-    drawSprite(ctx, 8, 6, 1.6, Game.lives > 0 ? SPRITES.heart : SPRITES.heartEmpty);
-    drawPanelText("$" + formatMoney(Game.score), 30, 6, 7, PALETTE.yellow);
+    for (let i = 0; i < Game.maxLives; i++) {
+      drawSprite(ctx, 8 + i * 12, 6, 1.6, i < Game.lives ? SPRITES.heart : SPRITES.heartEmpty);
+    }
+    drawPanelText("$" + formatMoney(Game.score), 8 + Game.maxLives * 12 + 10, 6, 7, PALETTE.yellow);
     drawPanelText("DAY " + Game.day, W - 10, 6, 6, "#a89a86", "right");
   }
   function drawPopup() {
