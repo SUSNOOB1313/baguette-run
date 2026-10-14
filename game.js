@@ -17,6 +17,10 @@
   ctx.imageSmoothingEnabled = false;
   const W = canvas.width;   // 384
   const H = canvas.height;  // 216
+  // Coarse pointer (finger) vs. fine pointer (mouse) — used to relax a few
+  // precision-dependent mechanics, like grabbing a dough-shaping handle,
+  // when there's no precise cursor to aim with.
+  const IS_TOUCH = !!(window.matchMedia && window.matchMedia("(pointer: coarse)").matches);
 
   const PALETTE = {
     counter: "#8a5a34",
@@ -467,7 +471,7 @@
   // Free-form dough sculpting for the Shop's SHAPE step: the dough is a ring of
   // grabbable control points, and any one of them can be picked up and dragged
   // to pull that part of the dough toward (or away from) a baguette shape.
-  const SHAPE_GRAB_R = 34;
+  const SHAPE_GRAB_R = IS_TOUCH ? 50 : 34;
   canvas.addEventListener("pointerdown", (e) => {
     if (Game.scene !== "SHOP" || Shop.step !== "SHAPE") return;
     const p = canvasPointFromEvent(e);
@@ -1090,10 +1094,11 @@
     ctx.strokeStyle = PALETTE.crust;
     ctx.lineWidth = 1.5;
     ctx.stroke();
+    const baseR = IS_TOUCH ? 4 : 3, dragR = IS_TOUCH ? 6 : 4.5;
     points.forEach((p, i) => {
       ctx.fillStyle = i === dragIndex ? PALETTE.yellow : "rgba(138,82,34,0.85)";
       ctx.beginPath();
-      ctx.arc(p.x, p.y, i === dragIndex ? 4.5 : 3, 0, Math.PI * 2);
+      ctx.arc(p.x, p.y, i === dragIndex ? dragR : baseR, 0, Math.PI * 2);
       ctx.fill();
     });
   }
